@@ -11,6 +11,6 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
-  server: { port: 3001 },
-  preview: { port: 3001 },
+  server: { port: 3001, proxy: { '/api': { target: 'http://localhost:8010' } } },
+  preview: { port: 3001, proxy: { '/api': { target: 'http://localhost:8010' } } },
 })

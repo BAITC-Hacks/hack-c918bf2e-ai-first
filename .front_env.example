@@ -1,1 +1,2 @@
-API_BASE=http://localhost:8010
+# Browser API origin; empty uses the /api proxy. Docker Compose reads API_BASE from .env.
+API_BASE=

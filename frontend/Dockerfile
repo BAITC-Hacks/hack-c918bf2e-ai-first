@@ -10,6 +10,6 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY docker/40-app-config.sh /docker-entrypoint.d/40-app-config.sh
 RUN chmod +x /docker-entrypoint.d/40-app-config.sh
 COPY --from=build /app/dist /usr/share/nginx/html
-ENV API_BASE=http://localhost:8010
+ENV API_BASE=""
 EXPOSE 80
 HEALTHCHECK --interval=15s --timeout=3s --retries=3 CMD wget -qO- http://127.0.0.1/healthz || exit 1

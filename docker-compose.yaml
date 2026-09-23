@@ -48,7 +48,7 @@ services:
     build:
       context: ./frontend
     environment:
-      API_BASE: ${API_BASE:-http://localhost:8010}
+      API_BASE: ${API_BASE:-}
     ports:
       - "${FRONTEND_PORT:-3001}:80"
     depends_on:

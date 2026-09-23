@@ -25,10 +25,18 @@ npm run dev      # http://localhost:3001, backend — http://localhost:8010
 npm run build    # vue-tsc + vite build
 ```
 
-Адрес backend берётся во время выполнения из `/config.js`
-(`window.__APP_CONFIG__.API_BASE`); в Docker файл генерируется из `API_BASE` при старте
-контейнера (`docker/40-app-config.sh`). Контейнер слушает порт 80, health check — `/healthz`.
-Backend должен разрешать origin фронтенда в CORS (`cors_origins`).
+По умолчанию браузер обращается к `/api` на том же адресе, где открыт frontend.
+В Docker nginx передаёт запросы в `backend:8010`; в dev/preview Vite — на
+`http://localhost:8010`. Не нужно открывать порт backend в браузере или настраивать CORS.
+nginx допускает до 200 МБ на весь запрос загрузки; backend отдельно ограничивает каждый
+файл 20 МБ. Неизвестный API-маршрут возвращает ошибку API, а не HTML приложения.
+
+Для внешнего backend можно задать `API_BASE` в `.env` Compose. При старте контейнера
+`docker/40-app-config.sh` записывает его в `/config.js` (`window.__APP_CONFIG__.API_BASE`).
+Если файл недоступен или значение пустое, используется локальный `/api` proxy;
+демоданные вместо ошибки не подставляются. Внешний backend должен разрешать origin
+frontend в CORS (`cors_origins`). `.front_env` автоматически Vite/Compose не читает.
+Контейнер слушает порт 80, health check — `/healthz`.
 
 ## Демо-режим
 
