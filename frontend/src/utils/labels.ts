@@ -1,74 +1,98 @@
-import type { AnalysisStatus, FindingType, Severity, StepStatus } from '@/api/types'
+import type { FindingType, OrganizationChangeStatus, Severity, StepStatus } from '@/api/types'
 
-export const TYPE_META: Record<FindingType, { label: string; color: string; icon: string; hint: string }> = {
-  lost: { label: 'Потеря', color: 'loss', icon: 'remove_circle_outline', hint: 'Функция не закреплена после реорганизации' },
-  duplicate: { label: 'Дублирование', color: 'dup', icon: 'content_copy', hint: 'Функция закреплена за несколькими подразделениями' },
-  changed: { label: 'Изменение', color: 'change', icon: 'edit_note', hint: 'Содержание функции существенно изменено' },
-  moved: { label: 'Перемещение', color: 'move', icon: 'swap_horiz', hint: 'Функция передана другому подразделению' },
-  added: { label: 'Добавление', color: 'add', icon: 'add_circle_outline', hint: 'Новая функция' },
-  unchanged: { label: 'Без изменений', color: 'same', icon: 'check', hint: 'Функция сохранена' },
+// Colours reference --sv-* tokens (src/css/tokens.scss) so both themes work.
+export const TYPE_META: Record<FindingType, { label: string; icon: string; fg: string; bg: string }> = {
+  lost: { label: 'Потеряна', icon: 'remove_circle_outline', fg: 'var(--sv-high)', bg: 'var(--sv-high-bg)' },
+  duplicate: { label: 'Дублирование', icon: 'control_point_duplicate', fg: 'var(--sv-duplicate)', bg: 'var(--sv-duplicate-bg)' },
+  changed: { label: 'Изменена', icon: 'change_circle', fg: 'var(--sv-medium)', bg: 'var(--sv-medium-bg)' },
+  moved: { label: 'Перемещена', icon: 'east', fg: 'var(--sv-moved)', bg: 'var(--sv-moved-bg)' },
+  added: { label: 'Новая', icon: 'add_circle_outline', fg: 'var(--sv-low)', bg: 'var(--sv-low-bg)' },
+  unchanged: { label: 'Без изменений', icon: 'check_circle_outline', fg: 'var(--sv-muted)', bg: 'var(--sv-line)' },
 }
 
+/** Priority order from the brief: lost → duplicate → changed → moved → added. */
 export const TYPE_ORDER: FindingType[] = ['lost', 'duplicate', 'changed', 'moved', 'added', 'unchanged']
 
-export const SEVERITY_META: Record<Severity, { label: string; color: string; rank: number }> = {
-  high: { label: 'Высокий', color: 'sev-high', rank: 0 },
-  medium: { label: 'Средний', color: 'sev-medium', rank: 1 },
-  low: { label: 'Низкий', color: 'sev-low', rank: 2 },
-  info: { label: 'Инфо', color: 'sev-info', rank: 3 },
+export const SEVERITY_META: Record<Severity, { label: string; icon: string; rank: number }> = {
+  high: { label: 'Высокий', icon: 'error', rank: 0 },
+  medium: { label: 'Средний', icon: 'warning_amber', rank: 1 },
+  low: { label: 'Низкий', icon: 'info', rank: 2 },
+  info: { label: 'Инфо', icon: 'info', rank: 3 },
 }
 
-export const SEVERITY_ORDER: Severity[] = ['high', 'medium', 'low', 'info']
-
-export const STATUS_META: Record<AnalysisStatus, { label: string; color: string; icon: string }> = {
-  queued: { label: 'В очереди', color: 'grey-7', icon: 'schedule' },
-  processing: { label: 'Выполняется', color: 'primary', icon: 'autorenew' },
-  completed: { label: 'Завершено', color: 'positive', icon: 'check_circle' },
-  failed: { label: 'Ошибка', color: 'negative', icon: 'error' },
+export const ORG_META: Record<OrganizationChangeStatus, { label: string; icon: string; fg: string; order: number }> = {
+  removed: { label: 'Упразднено', icon: 'indeterminate_check_box', fg: 'var(--sv-high)', order: 0 },
+  created: { label: 'Создано', icon: 'add_box', fg: 'var(--sv-low)', order: 1 },
+  transformed: { label: 'Преобразовано', icon: 'sync_alt', fg: 'var(--sv-moved)', order: 2 },
+  preserved: { label: 'Сохранено', icon: 'check', fg: 'var(--sv-muted)', order: 3 },
 }
 
-export const STEP_ICON: Record<StepStatus, string> = {
-  pending: 'radio_button_unchecked',
-  processing: 'autorenew',
-  completed: 'check_circle',
-  failed: 'cancel',
+export const STEP_META: Record<StepStatus, { label: string; icon: string; fg: string }> = {
+  pending: { label: 'Ожидает', icon: 'radio_button_unchecked', fg: 'var(--sv-dashed)' },
+  processing: { label: 'Выполняется', icon: 'autorenew', fg: 'var(--sv-accent)' },
+  completed: { label: 'Готово', icon: 'check_circle', fg: 'var(--sv-low)' },
+  failed: { label: 'Ошибка', icon: 'error', fg: 'var(--sv-high)' },
 }
 
-export const STEP_HINT: Record<string, string> = {
-  extract: 'Чтение PDF/DOCX, разметка разделов и пунктов',
-  structure: 'Подразделения и закреплённые за ними функции',
-  compare: 'Семантическое сопоставление функций «до» и «после»',
-  verify: 'Контролёр отклоняет выводы без ссылки на пункт документа',
-  report: 'Сводка рисков, рекомендации и заключение',
-}
+/** One-line explanations for the five pipeline stages, by position. */
+export const STEP_NOTES = [
+  'Читаем текст из DOCX, PDF и XLSX, сохраняем номера пунктов и страниц.',
+  'Находим подразделения и перечень функций каждого из них.',
+  'Сравниваем функции «до» и «после» по смыслу, а не по совпадению слов.',
+  'Для каждого вывода ищем точную цитату. Выводы без цитаты исключаются.',
+  'Оцениваем риски и готовим заключение с рекомендациями.',
+]
 
-export function confidenceLevel(value: number): { label: string; color: string } {
-  if (value >= 0.85) return { label: 'Высокая уверенность', color: 'positive' }
-  if (value >= 0.6) return { label: 'Средняя уверенность', color: 'warning' }
-  return { label: 'Требует проверки экспертом', color: 'negative' }
+export function confidenceLevel(value: number): string {
+  if (value >= 0.85) return 'высокая'
+  if (value >= 0.7) return 'средняя'
+  return 'низкая'
 }
 
 export function percent(value: number): string {
-  return `${Math.round(value * 100)} %`
-}
-
-export function formatDateTime(iso?: string): string {
-  if (!iso) return ''
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleString('ru-RU', { dateStyle: 'medium', timeStyle: 'short' })
-}
-
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} Б`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} КБ`
-  return `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} МБ`
+  return `${Math.round(value * 100)}%`
 }
 
 export function pluralize(n: number, forms: [string, string, string]): string {
-  const mod10 = n % 10
-  const mod100 = n % 100
-  if (mod10 === 1 && mod100 !== 11) return forms[0]
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return forms[1]
+  const a = n % 10
+  const b = n % 100
+  if (a === 1 && b !== 11) return forms[0]
+  if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return forms[1]
   return forms[2]
+}
+
+export const FILES: [string, string, string] = ['файл', 'файла', 'файлов']
+export const FINDINGS_WORD: [string, string, string] = ['вывод', 'вывода', 'выводов']
+export const DOCS_WORD: [string, string, string] = ['документ', 'документа', 'документов']
+export const FUNCS_WORD: [string, string, string] = ['функция', 'функции', 'функций']
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} Б`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`
+  return `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} МБ`
+}
+
+export function fileExt(name: string): string {
+  const m = /\.([a-z0-9]+)$/i.exec(name)
+  return m ? m[1].toUpperCase() : ''
+}
+
+export function docIcon(name: string): string {
+  const ext = fileExt(name)
+  if (ext === 'DOCX' || ext === 'DOC') return 'description'
+  if (ext === 'PDF') return 'picture_as_pdf'
+  if (ext === 'XLSX' || ext === 'XLS') return 'table_chart'
+  return 'insert_drive_file'
+}
+
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000))
+  const m = Math.floor(total / 60)
+  const s = total % 60
+  return m ? `${m} мин ${s} с` : `${s} с`
+}
+
+export function formatClock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }

@@ -2,7 +2,7 @@ import type { Analysis, AnalysisCreated, CreateAnalysisInput } from './types'
 import { createMockAnalysis, getMockAnalysis, isMockId } from './mock'
 
 const REQUEST_TIMEOUT_MS = 20_000
-const UPLOAD_TIMEOUT_MS = 120_000
+const UPLOAD_TIMEOUT_MS = 180_000
 
 export class ApiError extends Error {
   constructor(
@@ -15,8 +15,7 @@ export class ApiError extends Error {
 }
 
 export function apiBase(): string {
-  const base = window.__APP_CONFIG__?.API_BASE ?? ''
-  return base.replace(/\/+$/, '')
+  return (window.__APP_CONFIG__?.API_BASE ?? '').replace(/\/+$/, '')
 }
 
 async function request<T>(path: string, init: RequestInit, timeoutMs: number): Promise<T> {
@@ -25,11 +24,9 @@ async function request<T>(path: string, init: RequestInit, timeoutMs: number): P
   let response: Response
   try {
     response = await fetch(`${apiBase()}${path}`, { ...init, signal: controller.signal })
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new ApiError('Сервер не ответил вовремя', 'timeout')
-    }
-    throw new ApiError('Сервер анализа недоступен', 'network')
+  } catch {
+    if (controller.signal.aborted) throw new ApiError('Сервер не ответил вовремя', 'timeout')
+    throw new ApiError('Сервис анализа недоступен', 'network')
   } finally {
     window.clearTimeout(timer)
   }
@@ -47,7 +44,7 @@ async function request<T>(path: string, init: RequestInit, timeoutMs: number): P
 }
 
 export function createAnalysis(input: CreateAnalysisInput, useMock = false): Promise<AnalysisCreated> {
-  if (useMock) return Promise.resolve(createMockAnalysis(input))
+  if (useMock) return Promise.resolve(createMockAnalysis(input.title))
   const form = new FormData()
   input.beforeFiles.forEach((file) => form.append('before_files', file))
   input.afterFiles.forEach((file) => form.append('after_files', file))

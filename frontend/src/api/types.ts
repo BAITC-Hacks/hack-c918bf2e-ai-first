@@ -4,6 +4,7 @@ export type AnalysisStatus = 'queued' | 'processing' | 'completed' | 'failed'
 export type StepStatus = 'pending' | 'processing' | 'completed' | 'failed'
 export type FindingType = 'lost' | 'added' | 'moved' | 'changed' | 'duplicate' | 'unchanged'
 export type Severity = 'high' | 'medium' | 'low' | 'info'
+export type OrganizationChangeStatus = 'created' | 'preserved' | 'transformed' | 'removed'
 
 export interface AnalysisStep {
   code: string
@@ -31,6 +32,16 @@ export interface Finding {
   recommendation: string
 }
 
+export interface OrganizationChange {
+  id: string
+  status: OrganizationChangeStatus
+  before_name: string | null
+  after_name: string | null
+  explanation: string
+  before: Evidence | null
+  after: Evidence | null
+}
+
 export interface AnalysisSummary {
   before_functions: number
   after_functions: number
@@ -41,6 +52,14 @@ export interface AnalysisSummary {
   changed: number
   duplicates: number
   high_risk: number
+}
+
+/** One step of the multi-agent run. Only the public summary is exposed — no prompts or reasoning. */
+export interface AgentTraceEntry {
+  agent: string
+  action: string
+  status: string
+  summary: string
 }
 
 export interface AnalysisError {
@@ -58,8 +77,11 @@ export interface Analysis {
   steps: AnalysisStep[]
   summary?: AnalysisSummary | null
   findings?: Finding[]
+  organization_changes?: OrganizationChange[]
   conclusion?: string | null
   warnings?: string[]
+  agent_trace?: AgentTraceEntry[]
+  quality_score?: number | null
   error?: AnalysisError | null
 }
 

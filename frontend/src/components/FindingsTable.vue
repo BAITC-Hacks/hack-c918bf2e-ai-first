@@ -1,229 +1,246 @@
 <template>
-  <section class="panel column findings-panel">
-    <header class="panel-head">
-      <h2 class="panel-title">Отклонения</h2>
-      <q-badge color="grey-3" text-color="grey-9" class="tabular">{{ rows.length }} из {{ findings.length }}</q-badge>
-      <q-space />
-      <q-btn v-if="hasFilters" flat dense no-caps size="sm" icon="filter_alt_off" label="Сбросить" @click="reset" />
-    </header>
+  <section id="findings" aria-labelledby="f-h" class="sv-col section">
+    <div class="row items-baseline section-head">
+      <h2 id="f-h" class="sv-h2">Функциональные отклонения</h2>
+      <span class="sv-small sv-muted tabular">{{ countLabel }}</span>
+    </div>
 
-    <div class="filters q-px-md q-pt-md">
-      <div class="row q-gutter-xs q-mb-sm">
-        <q-chip
-          v-for="type in TYPE_ORDER"
-          :key="type"
-          clickable
+    <div v-if="findings.length" class="sv-col toolbar no-print">
+      <div class="row items-center toolbar-row">
+        <q-input
+          v-model="filters.query"
+          outlined
           dense
-          square
-          :aria-pressed="types.includes(type)"
-          :class="types.includes(type) ? `bg-${TYPE_META[type].color} text-white` : `bg-${TYPE_META[type].color}-soft text-${TYPE_META[type].color}`"
-          @click="toggleType(type)"
+          clearable
+          :debounce="200"
+          class="sv-input search"
+          placeholder="Поиск по выводу, подразделению, документу"
+          aria-label="Поиск"
+          @clear="filters.query = ''"
         >
-          {{ TYPE_META[type].label }}
-          <span class="q-ml-xs tabular chip-count">{{ counts[type] }}</span>
-        </q-chip>
+          <template #prepend><q-icon name="search" size="18px" /></template>
+        </q-input>
+        <q-space class="gt-xs" />
+        <q-select v-model="filters.risk" outlined dense emit-value map-options :options="RISK_OPTIONS" class="sv-input select" aria-label="Риск" />
+        <q-select v-model="filters.sort" outlined dense emit-value map-options :options="SORT_OPTIONS" class="sv-input select" aria-label="Сортировка" />
       </div>
-      <div class="row q-col-gutter-sm items-center">
-        <div class="col-12 col-sm">
-          <q-input v-model="search" dense outlined clearable placeholder="Поиск: функция, подразделение, пункт…">
-            <template #prepend><q-icon name="search" /></template>
-          </q-input>
-        </div>
-        <div class="col-12 col-sm-5 col-xl-4">
-          <q-select
-            v-model="severities"
-            dense
-            outlined
-            multiple
-            emit-value
-            map-options
-            :options="severityOptions"
-            label="Уровень риска"
-            :display-value="severities.length ? severities.map((s) => SEVERITY_META[s].label).join(', ') : 'Все'"
+      <div role="group" aria-label="Тип отклонения" class="row chips">
+        <button type="button" class="sv-filter-chip" :aria-pressed="!filters.types.length" @click="filters.types = []">
+          <q-icon v-if="!filters.types.length" name="check" />Все
+        </button>
+        <button
+          v-for="t in chipTypes"
+          :key="t.type"
+          type="button"
+          class="sv-filter-chip"
+          :aria-pressed="filters.types.includes(t.type)"
+          @click="toggleType(t.type)"
+        >
+          <q-icon
+            :name="filters.types.includes(t.type) ? 'check' : TYPE_META[t.type].icon"
+            :style="{ color: filters.types.includes(t.type) ? undefined : TYPE_META[t.type].fg }"
           />
-        </div>
-        <div class="col-12 col-sm-auto">
-          <q-toggle v-model="showUnchanged" dense label="Без изменений" :disable="types.includes('unchanged')" />
-        </div>
+          {{ TYPE_META[t.type].label }}<span class="tabular sv-muted">{{ t.count }}</span>
+        </button>
       </div>
     </div>
 
-    <q-table
-      flat
-      class="findings-table"
-      :rows="rows"
-      :columns="columns"
-      row-key="id"
-      :pagination="{ rowsPerPage: 12, sortBy: 'severity' }"
-      :rows-per-page-options="[12, 25, 0]"
-      no-data-label="Нет отклонений по выбранным фильтрам"
-      rows-per-page-label="Строк на странице"
-      :grid="$q.screen.lt.sm"
-    >
-      <template #body="{ row }">
-        <q-tr
-          class="cursor-pointer finding-row"
-          :class="{ 'finding-row--selected': row.id === selectedId }"
-          tabindex="0"
-          @click="$emit('select', row.id)"
-          @keydown.enter="$emit('select', row.id)"
-        >
-          <q-td key="severity">
-            <span class="row items-center no-wrap">
-              <span class="sev-dot q-mr-sm" :class="`bg-${SEVERITY_META[row.severity as Severity].color}`" />
-              {{ SEVERITY_META[row.severity as Severity].label }}
-            </span>
-          </q-td>
-          <q-td key="type">
-            <q-badge
-              :class="`bg-${TYPE_META[row.type as FindingType].color}-soft text-${TYPE_META[row.type as FindingType].color}`"
-              class="type-badge"
-            >
-              {{ TYPE_META[row.type as FindingType].label }}
-            </q-badge>
-          </q-td>
-          <q-td key="title" class="title-cell">
-            <div class="text-weight-medium">{{ row.title }}</div>
-            <div class="text-caption muted">{{ departments(row) }}</div>
-          </q-td>
-          <q-td key="refs" class="text-caption tabular">{{ refs(row) }}</q-td>
-          <q-td key="confidence" class="text-right tabular">
-            <span :class="`text-${confidenceLevel(row.confidence).color}`">{{ percent(row.confidence) }}</span>
-          </q-td>
-        </q-tr>
-      </template>
+    <div class="sv-card table-card">
+      <q-table
+        v-if="visible.length"
+        flat
+        :rows="visible"
+        :columns="columns"
+        row-key="id"
+        hide-pagination
+        :pagination="{ rowsPerPage: 0 }"
+        :grid="$q.screen.lt.md"
+        :visible-columns="visibleColumns"
+        class="table"
+        table-header-class="sv-th"
+      >
+        <template #header="hp">
+          <q-tr :props="hp">
+            <q-th v-for="col in hp.cols" :key="col.name" :props="hp" class="sv-th" :style="col.headerStyle">{{ col.label }}</q-th>
+          </q-tr>
+        </template>
 
-      <template #item="{ row }">
-        <div class="col-12 q-pa-xs">
-          <q-card flat bordered class="cursor-pointer" :class="{ 'finding-row--selected': row.id === selectedId }" @click="$emit('select', row.id)">
-            <q-card-section class="q-pb-xs row items-center q-gutter-x-sm">
-              <span class="sev-dot" :class="`bg-${SEVERITY_META[row.severity as Severity].color}`" />
-              <q-badge :class="`bg-${TYPE_META[row.type as FindingType].color}-soft text-${TYPE_META[row.type as FindingType].color}`">
-                {{ TYPE_META[row.type as FindingType].label }}
-              </q-badge>
-              <q-space />
-              <span class="text-caption tabular">{{ percent(row.confidence) }}</span>
-            </q-card-section>
-            <q-card-section class="q-pt-xs">
-              <div class="text-weight-medium">{{ row.title }}</div>
-              <div class="text-caption muted">{{ departments(row) }}</div>
-            </q-card-section>
-          </q-card>
-        </div>
-      </template>
-    </q-table>
+        <template #body="{ row, cols }">
+          <q-tr
+            class="row-click"
+            :class="{ 'row--selected': row.id === selectedId, 'row--high': row.severity === 'high' }"
+            tabindex="0"
+            role="button"
+            :aria-label="`${labelOf(row.id)}: ${row.title}`"
+            @click="openFinding(row.id)"
+            @keydown.enter.prevent="openFinding(row.id)"
+          >
+            <q-td v-for="col in cols" :key="col.name" :class="`cell-${col.name}`">
+              <RiskChip v-if="col.name === 'severity'" :severity="row.severity" />
+              <TypeLabel v-else-if="col.name === 'type'" :type="row.type" />
+              <div v-else-if="col.name === 'title'" class="sv-col" style="gap: 2px">
+                <span class="title">{{ row.title }}</span>
+                <span class="id tabular">{{ labelOf(row.id) }}</span>
+              </div>
+              <span v-else-if="col.name === 'department'" class="dept">{{ department(row) }}</span>
+              <div v-else-if="col.name === 'source'" class="sv-col source">
+                <span class="row items-center no-wrap" style="gap: 4px">
+                  <q-icon name="format_quote" size="15px" class="sv-muted" />{{ clauseLabel(primaryEvidence(row)) }}
+                </span>
+                <span class="doc ellipsis">{{ primaryEvidence(row)?.document ?? '—' }}</span>
+                <q-tooltip v-if="primaryEvidence(row)" :delay="400">{{ primaryEvidence(row)!.document }}</q-tooltip>
+              </div>
+              <ConfidenceMeter v-else-if="col.name === 'confidence'" :value="row.confidence" />
+              <q-icon v-else-if="col.name === 'chevron'" name="chevron_right" size="20px" style="color: var(--sv-icon-muted)" />
+            </q-td>
+          </q-tr>
+        </template>
+
+        <template #item="{ row }">
+          <div class="col-12 card-item">
+            <div
+              class="finding-card sv-col"
+              :class="{ 'row--selected': row.id === selectedId }"
+              tabindex="0"
+              role="button"
+              :aria-label="`${labelOf(row.id)}: ${row.title}`"
+              @click="openFinding(row.id)"
+              @keydown.enter.prevent="openFinding(row.id)"
+            >
+              <div class="row items-center" style="gap: 8px">
+                <RiskChip :severity="row.severity" />
+                <TypeLabel :type="row.type" />
+                <q-space />
+                <span class="id tabular">{{ labelOf(row.id) }}</span>
+              </div>
+              <span class="title">{{ row.title }}</span>
+              <span class="dept">{{ department(row) }}</span>
+              <div class="row items-center justify-between" style="gap: 8px">
+                <span class="sv-meta row items-center no-wrap" style="gap: 4px; min-width: 0">
+                  <q-icon name="format_quote" size="15px" />{{ clauseLabel(primaryEvidence(row)) }}
+                </span>
+                <ConfidenceMeter :value="row.confidence" />
+              </div>
+            </div>
+          </div>
+        </template>
+      </q-table>
+
+      <div v-else class="empty sv-col items-center text-center">
+        <template v-if="findings.length">
+          <q-icon name="filter_alt_off" size="32px" style="color: var(--sv-icon-muted)" />
+          <span class="empty-title">Нет отклонений по выбранным фильтрам</span>
+          <span class="sv-small sv-muted">Измените тип, риск или поисковый запрос.</span>
+          <q-btn flat no-caps class="sv-btn sv-btn--secondary q-mt-sm" label="Сбросить фильтры" @click="resetFilters" />
+        </template>
+        <template v-else>
+          <q-icon name="check_circle" size="32px" style="color: var(--sv-low)" />
+          <span class="empty-title">Функциональных отклонений не найдено</span>
+          <span class="sv-small sv-muted" style="max-width: 520px">
+            Все {{ beforeCount }} {{ pluralize(beforeCount, FUNCS_WORD) }} комплекта «до» сохранены за теми же подразделениями с прежними
+            формулировками. Заключение готово к подтверждению.
+          </span>
+        </template>
+      </div>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import type { QTableColumn } from 'quasar'
-import type { Finding, FindingType, Severity } from '@/api/types'
-import { SEVERITY_META, SEVERITY_ORDER, TYPE_META, TYPE_ORDER, confidenceLevel, percent } from '@/utils/labels'
+import { computed } from 'vue'
+import { useQuasar, type QTableColumn } from 'quasar'
+import type { Finding, FindingType } from '@/api/types'
+import ConfidenceMeter from './ConfidenceMeter.vue'
+import RiskChip from './RiskChip.vue'
+import TypeLabel from './TypeLabel.vue'
+import { useAnalysisContext } from '@/composables/analysisContext'
+import { clauseLabel, department, primaryEvidence } from '@/utils/findings'
+import { FINDINGS_WORD, FUNCS_WORD, TYPE_META, TYPE_ORDER, pluralize } from '@/utils/labels'
 
-const props = defineProps<{ findings: Finding[]; selectedId: string | null }>()
-defineEmits<{ select: [id: string] }>()
+defineProps<{ beforeCount: number }>()
 
-const types = defineModel<FindingType[]>('types', { default: () => [] })
-const search = ref<string | null>('')
-const severities = ref<Severity[]>([])
-const showUnchanged = ref(false)
+const $q = useQuasar()
+const { findings, filters, visible, resetFilters, openFinding, selectedId, labelOf } = useAnalysisContext()
 
-const severityOptions = SEVERITY_ORDER.map((value) => ({ value, label: SEVERITY_META[value].label }))
+const RISK_OPTIONS = [
+  { value: 'all', label: 'Любой риск' },
+  { value: 'high', label: 'Высокий риск' },
+  { value: 'medium', label: 'Средний риск' },
+  { value: 'low', label: 'Низкий риск' },
+]
+const SORT_OPTIONS = [
+  { value: 'priority', label: 'По приоритету' },
+  { value: 'confidence', label: 'По уверенности' },
+  { value: 'department', label: 'По подразделению' },
+]
 
-const counts = computed(() => {
-  const result = Object.fromEntries(TYPE_ORDER.map((t) => [t, 0])) as Record<FindingType, number>
-  props.findings.forEach((f) => (result[f.type] += 1))
-  return result
-})
-
-const hasFilters = computed(() => types.value.length > 0 || !!search.value || severities.value.length > 0 || showUnchanged.value)
+const chipTypes = computed(() =>
+  TYPE_ORDER.map((type) => ({ type, count: findings.value.filter((f) => f.type === type).length })).filter(
+    (t) => t.type !== 'unchanged' || t.count > 0,
+  ),
+)
 
 function toggleType(type: FindingType) {
-  types.value = types.value.includes(type) ? types.value.filter((t) => t !== type) : [...types.value, type]
+  filters.types = filters.types.includes(type) ? filters.types.filter((t) => t !== type) : [...filters.types, type]
 }
 
-function reset() {
-  types.value = []
-  search.value = ''
-  severities.value = []
-  showUnchanged.value = false
-}
-
-watch(types, (value) => {
-  if (value.includes('unchanged')) showUnchanged.value = true
-})
-
-function departments(f: Finding): string {
-  const before = f.before?.department ?? '—'
-  const after = f.after?.department ?? '—'
-  if (f.type === 'duplicate') return `${before} ↔ ${after}`
-  return before === after ? before : `${before} → ${after}`
-}
-
-function refs(f: Finding): string {
-  const parts = [f.before?.clause, f.after?.clause].map((c) => (c ? `п. ${c}` : '—'))
-  return f.type === 'duplicate' ? parts.join(' ↔ ') : parts.join(' → ')
-}
-
-const rows = computed(() => {
-  const query = (search.value ?? '').trim().toLowerCase()
-  return props.findings.filter((f) => {
-    if (types.value.length && !types.value.includes(f.type)) return false
-    if (!types.value.length && !showUnchanged.value && f.type === 'unchanged') return false
-    if (severities.value.length && !severities.value.includes(f.severity)) return false
-    if (!query) return true
-    const haystack = [
-      f.title,
-      f.explanation,
-      f.before?.department,
-      f.after?.department,
-      f.before?.clause,
-      f.after?.clause,
-      f.before?.document,
-      f.after?.document,
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-    return haystack.includes(query)
-  })
-})
+const total = computed(() => findings.value.length)
+const countLabel = computed(() =>
+  visible.value.length === total.value
+    ? `${total.value} ${pluralize(total.value, FINDINGS_WORD)}`
+    : `Показано ${visible.value.length} из ${total.value}`,
+)
 
 const columns: QTableColumn<Finding>[] = [
-  {
-    name: 'severity',
-    label: 'Риск',
-    field: 'severity',
-    align: 'left',
-    sortable: true,
-    sort: (a: Severity, b: Severity, rowA: Finding, rowB: Finding) =>
-      SEVERITY_META[a].rank - SEVERITY_META[b].rank || rowB.confidence - rowA.confidence,
-    style: 'width: 96px',
-  },
-  {
-    name: 'type',
-    label: 'Тип',
-    field: 'type',
-    align: 'left',
-    sortable: true,
-    sort: (a: FindingType, b: FindingType) => TYPE_ORDER.indexOf(a) - TYPE_ORDER.indexOf(b),
-    style: 'width: 120px',
-  },
-  { name: 'title', label: 'Функция · подразделения', field: 'title', align: 'left', sortable: true },
-  { name: 'refs', label: 'Пункты', field: (row) => refs(row), align: 'left', classes: 'no-wrap' },
-  { name: 'confidence', label: 'Увер.', field: 'confidence', align: 'right', sortable: true, style: 'width: 72px' },
+  { name: 'severity', label: 'Риск', field: 'severity', align: 'left', headerStyle: 'width: 120px' },
+  { name: 'type', label: 'Тип', field: 'type', align: 'left', headerStyle: 'width: 150px' },
+  { name: 'title', label: 'Вывод', field: 'title', align: 'left' },
+  { name: 'department', label: 'Подразделение', field: (r) => department(r), align: 'left', headerStyle: 'width: 210px' },
+  { name: 'source', label: 'Источник', field: 'id', align: 'left', headerStyle: 'width: 220px' },
+  { name: 'confidence', label: 'Уверенность', field: 'confidence', align: 'left', headerStyle: 'width: 120px' },
+  { name: 'chevron', label: '', field: 'id', align: 'right', headerStyle: 'width: 28px' },
 ]
+const visibleColumns = computed(() =>
+  columns.map((c) => c.name).filter((name) => name !== 'department' || $q.screen.width >= 1200),
+)
 </script>
 
 <style scoped lang="scss">
-.findings-panel { min-width: 0; overflow: hidden; }
-.findings-table { background: transparent; max-width: 100%; }
-.findings-table :deep(thead th) { font-weight: 600; color: var(--c-muted); font-size: 12px; }
-.finding-row:hover { background: #f5f8fb; }
-.finding-row:focus-visible { outline: 2px solid $primary; outline-offset: -2px; }
-.finding-row--selected, .finding-row--selected:hover { background: #e8f1fb; box-shadow: inset 3px 0 0 $primary; }
-.title-cell { white-space: normal; min-width: 220px; }
-.type-badge { font-weight: 500; padding: 3px 8px; }
-.chip-count { opacity: .8; }
+.section { gap: 12px; scroll-margin-top: 72px; }
+.section-head { gap: 8px 16px; flex-wrap: wrap; }
+.toolbar { gap: 10px; }
+.toolbar-row { gap: 10px; flex-wrap: wrap; }
+.search { flex: 0 1 360px; min-width: 220px; }
+.chips { gap: 4px; flex-wrap: wrap; }
+.select { flex: none; width: 168px; }
+.table-card { overflow: hidden; }
+.table { background: transparent; color: var(--sv-text);
+  :deep(thead tr) { height: 38px; }
+  :deep(th) { border-bottom: 1px solid var(--sv-divider) !important; padding: 10px 14px !important; }
+  :deep(td) { border-bottom: 1px solid var(--sv-line) !important; padding: 12px 14px !important; white-space: normal; vertical-align: middle; }
+  :deep(tbody tr:last-child td) { border-bottom: 0 !important; }
+  :deep(.q-table__middle) { max-height: none; }
+}
+.row-click { cursor: pointer; &:hover { background: var(--sv-accent-tint); } }
+.row--selected, .row--selected:hover { background: var(--sv-accent-tint); box-shadow: inset 0 0 0 1px var(--sv-accent-line); }
+.title { font-size: 14px; line-height: 1.35; }
+.row--high .title { font-weight: 500; }
+.id { font-size: 11px; color: var(--sv-muted); }
+.dept { font-size: 13px; line-height: 1.35; color: var(--sv-text-2); }
+.source { gap: 2px; min-width: 0; max-width: 220px; font-size: 13px; }
+.doc { font-size: 11px; color: var(--sv-muted); max-width: 200px; }
+.cell-title { min-width: 240px; }
+.empty { padding: 40px 16px; gap: 8px; }
+.empty-title { font-size: 16px; font-weight: 500; }
+.card-item { padding: 0; }
+.finding-card {
+  gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--sv-line); cursor: pointer; min-height: 44px;
+  &:hover { background: var(--sv-accent-tint); }
+}
+@media (max-width: 599px) {
+  .search { flex: 1 1 100%; }
+  .select { flex: 1 1 140px; width: auto; }
+  .chips { flex-wrap: nowrap; overflow-x: auto; width: 100%; padding-bottom: 2px; }
+  :deep(.sv-filter-chip) { min-height: 44px; flex: none; }
+}
 </style>
