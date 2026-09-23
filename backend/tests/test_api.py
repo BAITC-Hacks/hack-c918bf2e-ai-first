@@ -1,6 +1,9 @@
+import asyncio
 import time
+from datetime import UTC, datetime
 from io import BytesIO
 
+import pytest
 from docx import Document
 from fastapi.testclient import TestClient
 
@@ -9,14 +12,70 @@ from app.analyzer import ComparisonDraft, EvidenceDraft, FindingDraft, QualityAs
 from app.config import Settings
 from app.main import app
 from app.registry import FunctionLinkDraft
+from app.schemas import Analysis, AnalysisStep
+from app.store import MemoryAnalysisStore
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def isolated_store(monkeypatch):
+    monkeypatch.setattr(main, "store", MemoryAnalysisStore())
 
 
 def test_health() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_health_fails_when_storage_unavailable(monkeypatch) -> None:
+    async def unavailable():
+        raise ConnectionError("private database connection info")
+
+    monkeypatch.setattr(main.store, "healthy", unavailable)
+    response = client.get("/health")
+    assert response.status_code == 503
+    assert "private" not in response.text
+
+
+def test_storage_errors_are_sanitized(monkeypatch) -> None:
+    async def unavailable(*args):
+        raise ConnectionError("private database password")
+
+    monkeypatch.setattr(main.store, "get", unavailable)
+    response = client.get("/api/v1/analyses/unknown")
+    assert response.status_code == 503
+    assert "private" not in response.text
+
+
+def test_missing_analysis_returns_404() -> None:
+    assert client.get("/api/v1/analyses/unknown").status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_cancelled_job_preserves_interrupted_state(monkeypatch):
+    started = asyncio.Event()
+
+    async def blocked_worker(*args):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(main.asyncio, "to_thread", blocked_worker)
+    analysis = Analysis(id="cancelled-test", title="Test", status="queued", progress=20,
+                        current_step="Выделение функций", created_at=datetime.now(UTC),
+                        steps=[AnalysisStep(code="structure", title="Функции", status="processing")])
+    await main.store.put(analysis)
+    task = asyncio.create_task(main.run_analysis(analysis.id, [], []))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    recovered = await main.store.get(analysis.id)
+    assert recovered.status == "failed"
+    assert recovered.progress == 20
+    assert recovered.error.code == "ANALYSIS_INTERRUPTED"
+    assert recovered.steps[0].status == "failed"
 
 
 def test_analysis_requires_supported_documents() -> None:

@@ -1,11 +1,16 @@
 import asyncio
+import logging
+import threading
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
+import asyncpg
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.pipeline import analyze_documents
@@ -17,10 +22,30 @@ from app.schemas import (
     AnalysisStep,
     StepStatus,
 )
-from app.store import store
+from app.store import PostgresAnalysisStore, mark_interrupted
 
 settings = get_settings()
-app = FastAPI(title="AI First API", version="0.1.0")
+store = PostgresAnalysisStore(settings.database_url)
+logger = logging.getLogger(__name__)
+jobs: set[asyncio.Task] = set()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    recovered = await store.start()
+    logger.info("Analysis storage ready; interrupted runs marked failed: %s", recovered)
+    try:
+        yield
+    finally:
+        pending = list(jobs)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        await store.close()
+
+
+app = FastAPI(title="AI First API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
@@ -39,8 +64,23 @@ STEP_DEFINITIONS = [
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".xlsx"}
 
 
+async def storage_error_handler(request, exc) -> JSONResponse:
+    # Do not expose database URLs, credentials, or raw query errors to clients.
+    logger.error("Storage request failed: %s", type(exc).__name__)
+    return JSONResponse(status_code=503, content={"detail": "Хранилище временно недоступно"})
+
+
+for error_type in (asyncpg.PostgresError, asyncpg.InterfaceError, ConnectionError, TimeoutError):
+    app.add_exception_handler(error_type, storage_error_handler)
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
+    try:
+        if not await store.healthy():
+            raise ConnectionError("Storage healthcheck failed")
+    except Exception as exc:
+        raise HTTPException(503, "Хранилище временно недоступно") from exc
     return {"status": "ok"}
 
 
@@ -71,6 +111,7 @@ async def run_analysis(analysis_id: str, before: list[Path], after: list[Path]) 
     analysis.status = AnalysisStatus.PROCESSING
     await store.put(analysis)
     loop = asyncio.get_running_loop()
+    stopped = threading.Event()
 
     async def update_stage(code: str, progress: int) -> None:
         index = next(index for index, step in enumerate(analysis.steps) if step.code == code)
@@ -87,7 +128,9 @@ async def run_analysis(analysis_id: str, before: list[Path], after: list[Path]) 
         await store.put(analysis)
 
     def on_stage(code: str, progress: int) -> None:
-        asyncio.run_coroutine_threadsafe(update_stage(code, progress), loop).result(timeout=5)
+        if stopped.is_set():
+            raise RuntimeError("Analysis interrupted")
+        asyncio.run_coroutine_threadsafe(update_stage(code, progress), loop).result(timeout=15)
 
     try:
         result = await asyncio.to_thread(analyze_documents, before, after, settings, on_stage)
@@ -105,6 +148,11 @@ async def run_analysis(analysis_id: str, before: list[Path], after: list[Path]) 
         analysis.status = AnalysisStatus.COMPLETED
         analysis.current_step = "Готово"
         await store.put(analysis)
+    except asyncio.CancelledError:
+        stopped.set()
+        mark_interrupted(analysis)
+        await store.put(analysis)
+        raise
     except Exception as exc:  # noqa: BLE001 - defensive background job boundary
         analysis.status = AnalysisStatus.FAILED
         analysis.current_step = "Ошибка"
@@ -113,8 +161,19 @@ async def run_analysis(analysis_id: str, before: list[Path], after: list[Path]) 
         )
         if processing_step:
             processing_step.status = StepStatus.FAILED
-        analysis.error = AnalysisError(code="ANALYSIS_ERROR", message=str(exc))
+        logger.error("Analysis %s failed: %s", analysis_id, type(exc).__name__)
+        analysis.error = AnalysisError(
+            code="ANALYSIS_ERROR",
+            message="Не удалось завершить анализ. Проверьте документы и доступность API модели. "
+            "Если ошибка повторится, сообщите администратору идентификатор анализа.",
+        )
         await store.put(analysis)
+
+
+def job_finished(task: asyncio.Task) -> None:
+    jobs.discard(task)
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("Background analysis failed: %s", type(task.exception()).__name__)
 
 
 @app.post("/api/v1/analyses", response_model=AnalysisCreated, status_code=status.HTTP_202_ACCEPTED)
@@ -139,7 +198,9 @@ async def create_analysis(
         steps=[AnalysisStep(code=code, title=step_title) for code, step_title in STEP_DEFINITIONS],
     )
     await store.put(analysis)
-    asyncio.create_task(run_analysis(analysis_id, before, after))
+    task = asyncio.create_task(run_analysis(analysis_id, before, after))
+    jobs.add(task)
+    task.add_done_callback(job_finished)
     return AnalysisCreated(id=analysis.id, status=analysis.status, created_at=analysis.created_at)
 
 

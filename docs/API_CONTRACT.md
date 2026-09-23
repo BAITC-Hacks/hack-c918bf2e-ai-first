@@ -108,6 +108,13 @@ backend и frontend до реализации.
 
 `status`: `queued | processing | completed | failed`.
 
+Состояние и результат сохраняются в PostgreSQL. Завершённый анализ доступен по тому же
+ID после рестарта. Прерванные `queued/processing` переходят в `failed` с
+`error.code = ANALYSIS_INTERRUPTED`: последний прогресс сохраняется, выполнявшийся
+этап помечается `failed`. Автоматического продолжения нет; предложите новый запуск
+с повторной загрузкой файлов. Форма JSON не изменилась. При недоступной БД API и
+`GET /health` возвращают `503`, а не подменяют результат моками.
+
 `finding.type`: `lost | added | moved | changed | duplicate | unchanged`.
 
 `organization_changes.status`: `created | preserved | transformed | removed`.

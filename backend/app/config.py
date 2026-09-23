@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
+    database_url: str = ""
     openai_api_key: str = ""
     openai_model: str = "gpt-6-sol"
     openai_reasoning_effort: str = "low"
