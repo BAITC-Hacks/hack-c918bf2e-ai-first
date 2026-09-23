@@ -30,12 +30,13 @@ def normalize(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip().lower().replace("ё", "е")
 
 
-def normalize_quote(value: str) -> str:
-    return re.sub(r"[^a-zа-я0-9]+", " ", normalize(value)).strip()
+def normalize_clause(value: str) -> str:
+    match = re.search(r"\d+(?:\.\d+)+", value)
+    return match.group(0) if match else value.strip().rstrip(".")
 
 
 def evidence_index(clauses: list[Clause]) -> dict[tuple[str, str], Clause]:
-    return {(normalize(item.document), item.clause): item for item in clauses}
+    return {(normalize(item.document), normalize_clause(item.clause)): item for item in clauses}
 
 
 def verify_evidence(
@@ -43,20 +44,20 @@ def verify_evidence(
 ) -> Evidence | None:
     if draft is None:
         return None
-    clause = index.get((normalize(draft.document), draft.clause))
+    clause_number = normalize_clause(draft.clause)
+    clause = index.get((normalize(draft.document), clause_number))
     if clause is None:
-        same_number = [item for (_, number), item in index.items() if number == draft.clause]
+        same_number = [item for (_, number), item in index.items() if number == clause_number]
         clause = same_number[0] if len(same_number) == 1 else None
     if clause is None:
         return None
-    quote = normalize_quote(draft.quote)
-    source = normalize_quote(clause.text)
-    if len(quote) < 12 or quote not in source:
-        return None
+    # The model selects the source clause; the quote itself always comes from the
+    # parser. This prevents a paraphrased or hallucinated quote from reaching users.
+    exact_quote = clause.text[:1200]
     return Evidence(
         department=draft.department,
         clause=clause.clause,
-        quote=draft.quote.strip(),
+        quote=exact_quote,
         document=clause.document,
         page=clause.page,
     )

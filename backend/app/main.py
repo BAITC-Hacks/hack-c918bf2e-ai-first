@@ -8,7 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.pipeline import analyze_documents
-from app.schemas import Analysis, AnalysisCreated, AnalysisStatus, AnalysisStep
+from app.schemas import (
+    Analysis,
+    AnalysisCreated,
+    AnalysisError,
+    AnalysisStatus,
+    AnalysisStep,
+    StepStatus,
+)
 from app.store import store
 
 settings = get_settings()
@@ -64,34 +71,34 @@ async def run_analysis(analysis_id: str, before: list[Path], after: list[Path]) 
     await store.put(analysis)
     try:
         for index, step in enumerate(analysis.steps[:2]):
-            step.status = "processing"
+            step.status = StepStatus.PROCESSING
             analysis.current_step = step.title
             analysis.progress = index * 20 + 5
             await store.put(analysis)
             await asyncio.sleep(0)
-            step.status = "completed"
+            step.status = StepStatus.COMPLETED
             analysis.progress = (index + 1) * 20
 
-        analysis.steps[2].status = "processing"
+        analysis.steps[2].status = StepStatus.PROCESSING
         analysis.current_step = analysis.steps[2].title
         analysis.progress = 45
         result = await asyncio.to_thread(analyze_documents, before, after, settings)
-        analysis.steps[2].status = "completed"
+        analysis.steps[2].status = StepStatus.COMPLETED
         analysis.progress = 70
 
-        analysis.steps[3].status = "processing"
+        analysis.steps[3].status = StepStatus.PROCESSING
         analysis.current_step = analysis.steps[3].title
         analysis.findings = result.findings
         analysis.organization_changes = result.organization_changes
         analysis.summary = result.summary
         analysis.warnings = result.warnings
-        analysis.steps[3].status = "completed"
+        analysis.steps[3].status = StepStatus.COMPLETED
         analysis.progress = 90
 
-        analysis.steps[4].status = "processing"
+        analysis.steps[4].status = StepStatus.PROCESSING
         analysis.current_step = analysis.steps[4].title
         analysis.conclusion = result.conclusion
-        analysis.steps[4].status = "completed"
+        analysis.steps[4].status = StepStatus.COMPLETED
         analysis.progress = 100
         analysis.status = AnalysisStatus.COMPLETED
         analysis.current_step = "Готово"
@@ -99,7 +106,12 @@ async def run_analysis(analysis_id: str, before: list[Path], after: list[Path]) 
     except Exception as exc:  # pragma: no cover - defensive job boundary
         analysis.status = AnalysisStatus.FAILED
         analysis.current_step = "Ошибка"
-        analysis.error = {"code": "ANALYSIS_ERROR", "message": str(exc)}
+        processing_step = next(
+            (step for step in analysis.steps if step.status == StepStatus.PROCESSING), None
+        )
+        if processing_step:
+            processing_step.status = StepStatus.FAILED
+        analysis.error = AnalysisError(code="ANALYSIS_ERROR", message=str(exc))
         await store.put(analysis)
 
 
