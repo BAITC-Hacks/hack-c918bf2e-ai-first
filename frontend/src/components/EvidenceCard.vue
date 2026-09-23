@@ -14,10 +14,10 @@
           <q-icon :name="docIcon(evidence.document)" size="15px" class="sv-muted" />
           <span class="ellipsis" :title="evidence.document">{{ evidence.document }}</span>
         </dd>
-        <dt>Пункт</dt>
+        <dt>Пункт / фрагмент</dt>
         <dd class="strong">{{ evidence.clause || 'не указан' }}</dd>
         <dt>Страница</dt>
-        <dd>{{ evidence.page ?? `нет данных${fileExt(evidence.document) ? ` (${fileExt(evidence.document)})` : ''}` }}</dd>
+        <dd>{{ evidence.page ?? `не указана${fileExt(evidence.document) ? ` (${fileExt(evidence.document)})` : ''}` }}</dd>
         <dt>Подразделение</dt>
         <dd>{{ evidence.department || 'не указано' }}</dd>
       </dl>

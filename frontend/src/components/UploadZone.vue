@@ -79,7 +79,13 @@ const counter = computed(() => {
 
 function add(list: FileList | null | undefined) {
   if (!list?.length) return
-  const skipped = addFiles(props.set, Array.from(list))
+  const { skipped, clearedDemo } = addFiles(props.set, Array.from(list))
+  if (clearedDemo) {
+    $q.notify({
+      message: 'Демонстрационные файлы убраны: форма переключена на анализ ваших документов',
+      icon: 'swap_horiz',
+    })
+  }
   if (skipped) $q.notify({ message: `Не более ${MAX_FILES_PER_SET} файлов в комплекте — пропущено: ${skipped}`, icon: 'error_outline' })
 }
 

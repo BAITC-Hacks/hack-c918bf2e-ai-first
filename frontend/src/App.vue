@@ -14,7 +14,7 @@
         </nav>
         <q-space />
         <span v-if="isDemo" class="demo-chip row items-center no-wrap">
-          <q-icon name="dataset" size="15px" /><span class="gt-xs">Тестовые данные</span>
+          <q-icon name="dataset" size="15px" /><span class="gt-xs">Демонстрация интерфейса</span>
         </span>
         <q-btn
           flat
@@ -42,10 +42,13 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { isMockId } from '@/api/mock'
 import { crumbTitle } from '@/composables/useAnalysis'
+import { draft } from '@/stores/draft'
 import { theme, toggleTheme } from '@/stores/theme'
 
 const route = useRoute()
-const isDemo = computed(() => typeof route.params.id === 'string' && isMockId(route.params.id))
+const isDemo = computed(() =>
+  typeof route.params.id === 'string' ? isMockId(route.params.id) : route.name === 'new' && draft.mode === 'demo',
+)
 const crumb = computed(() => (route.name === 'new' ? 'Новый анализ' : route.params.id ? crumbTitle.value : ''))
 </script>
 

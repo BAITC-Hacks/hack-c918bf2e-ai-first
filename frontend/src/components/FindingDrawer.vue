@@ -48,21 +48,22 @@
           </div>
           <div class="evidence-grid">
             <EvidenceCard
-              :evidence="finding.before"
-              :badge="isDup ? 'ФРАГМЕНТ 1' : 'ДО'"
-              :set-label="isDup ? 'Комплект после' : 'Комплект до'"
-              :segments="diff?.before"
-              missing-title="В комплекте «до» функции не было"
-              missing-text="Аналог не найден ни в одном документе исходной структуры."
+              v-for="side in sides"
+              :key="side.side"
+              :evidence="side.evidence"
+              :badge="side.badge"
+              :set-label="side.setLabel"
+              :segments="side.side === 'before' ? diff?.before : diff?.after"
+              :missing-title="side.missingTitle"
+              :missing-text="side.missingText"
             />
-            <EvidenceCard
-              :evidence="finding.after"
-              :badge="isDup ? 'ФРАГМЕНТ 2' : 'ПОСЛЕ'"
-              set-label="Комплект после"
-              :segments="diff?.after"
-              missing-title="В комплекте «после» функция не найдена"
-              missing-text="Агент проверил все документы новой структуры; соответствующего пункта нет."
-            />
+          </div>
+          <div v-if="coverage.kind !== 'complete'" role="note" class="sv-banner sv-banner--warn coverage-note">
+            <q-icon name="report_problem" />
+            <span class="col">
+              <b>Ограничение охвата.</b> {{ coverage.headline }}
+              Отсутствие цитаты не доказывает отсутствие функции в документах.
+            </span>
           </div>
         </section>
 
@@ -77,15 +78,18 @@
             <span>Рекомендация · требует проверки специалистом</span>
           </div>
           <p class="reco-text">{{ finding.recommendation }}</p>
-          <q-btn
-            flat
-            no-caps
-            class="sv-btn sv-btn--secondary self-start no-print"
-            :icon="reviewed ? 'task_alt' : 'check_box_outline_blank'"
-            :label="reviewed ? 'Отмечено как проверенное' : 'Отметить как проверенное'"
-            :aria-pressed="reviewed"
-            @click="toggleReviewed(analysisId, finding.id)"
-          />
+          <div class="sv-col no-print" style="gap: 4px">
+            <q-btn
+              flat
+              no-caps
+              class="sv-btn sv-btn--secondary self-start"
+              :icon="reviewed ? 'task_alt' : 'check_box_outline_blank'"
+              :label="reviewed ? 'Отмечено в этом браузере' : 'Отметить в этом браузере'"
+              :aria-pressed="reviewed"
+              @click="toggleReviewed(analysisId, finding.id)"
+            />
+            <span class="sv-meta">Личная заметка: хранится только в этом браузере, не сохраняется на сервере и не является согласованием сотрудника.</span>
+          </div>
         </section>
       </div>
     </aside>
@@ -101,6 +105,8 @@ import RiskChip from './RiskChip.vue'
 import TypeLabel from './TypeLabel.vue'
 import { useAnalysisContext } from '@/composables/analysisContext'
 import { isReviewed, toggleReviewed } from '@/stores/reviewed'
+import { coverageState } from '@/utils/coverage'
+import { evidenceSides } from '@/utils/evidence'
 import { wordDiff } from '@/utils/findings'
 import { confidenceLevel, percent } from '@/utils/labels'
 
@@ -112,7 +118,8 @@ const { analysis } = useAnalysisContext()
 const analysisId = computed(() => analysis.value?.id ?? '')
 const body = ref<HTMLElement | null>(null)
 
-const isDup = computed(() => props.finding?.type === 'duplicate')
+const sides = computed(() => (props.finding ? evidenceSides(props.finding) : []))
+const coverage = computed(() => coverageState(analysis.value ?? {}))
 const diff = computed(() => {
   const f = props.finding
   if (!f || !f.before || !f.after || (f.type !== 'changed' && f.type !== 'moved')) return null

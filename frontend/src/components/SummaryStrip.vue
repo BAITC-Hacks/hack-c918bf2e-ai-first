@@ -3,10 +3,10 @@
     <div class="cell risk-cell" :class="{ 'risk-cell--hot': s.high_risk > 0 }">
       <span class="sv-overline sv-overline--muted">Высокий риск</span>
       <div class="row items-center no-wrap" style="gap: 10px">
-        <q-icon :name="s.high_risk ? 'error' : 'check_circle'" size="30px" :style="{ color: riskFg }" />
+        <q-icon :name="s.high_risk ? 'error' : 'remove'" size="30px" :style="{ color: riskFg }" />
         <span class="kpi-xl tabular" :style="{ color: riskFg }">{{ s.high_risk }}</span>
       </div>
-      <span class="note">{{ s.high_risk ? 'отклонения требуют проверки до утверждения структуры' : 'Отклонений высокого риска не выявлено' }}</span>
+      <span class="note">{{ s.high_risk ? 'отклонения требуют проверки до утверждения структуры' : 'В принятых выводах высокий риск не указан — это не гарантия его отсутствия' }}</span>
       <q-btn
         v-if="s.high_risk"
         flat
@@ -53,6 +53,10 @@
         <span v-show="s.unchanged" :style="{ flex: s.unchanged, background: 'var(--sv-border)' }" :title="`Без изменений: ${s.unchanged}`" />
       </div>
       <span class="sv-meta">Серым — {{ s.unchanged }} {{ pluralize(s.unchanged, FUNCS_WORD) }} без изменений.</span>
+      <span v-if="risksInEdition != null" class="sv-meta">
+        Дублирование и возможный конфликт интересов внутри редакции считаются отдельно:
+        <button type="button" class="risks-link" @click="scrollToRisks">потенциальные риски — {{ risksInEdition }}</button>.
+      </span>
     </div>
   </section>
 </template>
@@ -62,18 +66,25 @@ import { computed } from 'vue'
 import type { AnalysisSummary, FindingType } from '@/api/types'
 import { FINDINGS_WORD, FUNCS_WORD, TYPE_META, pluralize } from '@/utils/labels'
 
-const props = defineProps<{ summary: AnalysisSummary; active: FindingType | null }>()
+// risksInEdition: length of structural_risks (null — block not provided). Never added to these counters.
+const props = defineProps<{ summary: AnalysisSummary; active: FindingType | null; risksInEdition?: number | null }>()
 defineEmits<{ showHigh: []; toggleType: [type: FindingType] }>()
 
 const s = computed(() => props.summary)
-const riskFg = computed(() => (s.value.high_risk ? 'var(--sv-high)' : 'var(--sv-low)'))
+
+function scrollToRisks() {
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  document.getElementById('structural-risks')?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+}
+const riskFg = computed(() => (s.value.high_risk ? 'var(--sv-high)' : 'var(--sv-muted)'))
 const cells = computed(() => [
   { type: 'lost' as const, count: s.value.lost },
   { type: 'duplicate' as const, count: s.value.duplicates },
   { type: 'changed' as const, count: s.value.changed },
   { type: 'moved' as const, count: s.value.moved },
   { type: 'added' as const, count: s.value.added },
-])
+].filter((k) => k.type !== 'duplicate' || k.count > 0 || props.risksInEdition == null))
+// New-format results keep duplicates in structural_risks; an always-empty legacy cell would mislead.
 const total = computed(() => cells.value.reduce((sum, k) => sum + k.count, 0))
 </script>
 
@@ -98,6 +109,7 @@ const total = computed(() => cells.value.reduce((sum, k) => sum + k.count, 0))
   &[aria-pressed='true'] { border-color: var(--sv-accent); background: var(--sv-accent-tint); }
 }
 .bd-label { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.risks-link { background: none; border: 0; padding: 0; font: inherit; color: var(--sv-accent); text-decoration: underline; cursor: pointer; }
 .bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; gap: 2px; }
 @media (max-width: 599px) {
   .summary { grid-template-columns: 1fr 1fr; }

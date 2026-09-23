@@ -7,8 +7,24 @@
           <h1 class="sv-display">Найдите потерянные и дублирующиеся функции до утверждения новой структуры</h1>
           <p class="sv-lead q-mb-none">
             Загрузите документы «до» и «после» реорганизации. Агент сопоставит подразделения и функции и подкрепит
-            каждый вывод цитатой с указанием документа, пункта и страницы.
+            каждый вывод цитатой с указанием документа, пункта и — если она доступна — страницы.
           </p>
+        </div>
+
+        <div v-if="draft.mode === 'demo'" role="status" class="sv-banner sv-banner--demo items-center">
+          <q-icon name="dataset" size="20px" />
+          <div class="col sv-col">
+            <b>{{ DEMO_NOTICE }}</b>
+            <span>Файлы ниже — заглушки из подготовленного набора. Чтобы проанализировать свои документы, добавьте их: заглушки будут убраны.</span>
+          </div>
+          <q-btn flat no-caps class="sv-btn sv-btn--secondary" icon="close" label="Выйти из демонстрации" @click="exitDemo" />
+        </div>
+        <div v-else role="note" class="sv-banner sv-banner--warn">
+          <q-icon name="cloud_upload" />
+          <span class="col">
+            <b>Перед загрузкой:</b> в текущем прототипе текст документов передаётся во внешний API OpenAI для анализа.
+            Для демонстрации используйте обезличенные документы без персональных данных и коммерческой тайны.
+          </span>
         </div>
 
         <div v-if="submitError" role="alert" class="sv-banner sv-banner--err items-center">
@@ -39,8 +55,8 @@
 
         <div class="actions row items-center">
           <div class="security sv-meta row no-wrap items-center">
-            <q-icon name="lock" size="16px" class="q-mr-xs" />
-            Документы обрабатываются во внутреннем контуре и не используются для обучения моделей.
+            <q-icon name="info" size="16px" class="q-mr-xs" />
+            {{ draft.mode === 'demo' ? 'Запуск покажет подготовленный результат; документы никуда не отправляются.' : 'Текст документов будет передан во внешний API OpenAI.' }}
           </div>
           <div class="buttons row no-wrap items-center">
             <q-btn flat no-caps class="sv-btn sv-btn--secondary sv-btn--lg" icon="dataset" label="Демо на тестовых данных" @click="runDemoFill" />
@@ -49,7 +65,7 @@
               no-caps
               class="sv-btn sv-btn--primary sv-btn--lg launch"
               icon="play_arrow"
-              :label="submitting ? 'Запуск…' : 'Запустить анализ'"
+              :label="draft.mode === 'demo' ? 'Открыть демонстрацию' : submitting ? 'Запуск…' : 'Запустить анализ'"
               :loading="submitting"
               :disable="!!disabledReason"
               @click="submit"
@@ -93,15 +109,18 @@ import { useRouter } from 'vue-router'
 import UploadZone from '@/components/UploadZone.vue'
 import { ApiError, createAnalysis } from '@/api/client'
 import { DEMO_FILES, DEMO_TITLE } from '@/api/mock'
-import { draft, fillDemo, isDemoDraft, readyFiles, runMeta } from '@/stores/draft'
+import { useQuasar } from 'quasar'
+import { clearDemo, draft, fillDemo, hasRealFiles, readyFiles, rememberRun, submission } from '@/stores/draft'
+import { DEMO_NOTICE } from '@/utils/demo'
 
 const CHECKS = [
   { icon: 'account_tree', title: 'Изменения подразделений', note: 'Созданные, сохранённые, преобразованные и упразднённые' },
   { icon: 'remove_circle_outline', title: 'Потерянные функции', note: 'Функции, не закреплённые ни за одним подразделением' },
   { icon: 'control_point_duplicate', title: 'Дублирование', note: 'Одна функция закреплена за несколькими подразделениями' },
   { icon: 'east', title: 'Передача и изменение функций', note: 'Куда перешла функция и как изменилась формулировка' },
-  { icon: 'gavel', title: 'Конфликты интересов', note: 'Совмещение исполнения и контроля в одном подразделении' },
-  { icon: 'format_quote', title: 'Доказательства', note: 'Каждый вывод — с документом, пунктом, страницей и цитатой' },
+  { icon: 'format_quote', title: 'Доказательства', note: 'Каждый вывод — с документом, пунктом и цитатой; страница — если она есть в документе' },
+  { icon: 'gavel', title: 'Риски внутри редакции', note: 'Дублирование и возможный конфликт интересов — с цитатами, если сервис их передал; это гипотезы для проверки, не юридическое заключение' },
+  { icon: 'rule', title: 'Охват обработки', note: 'Сколько фрагментов и сопоставлений осталось без решения' },
 ]
 
 const router = useRouter()
@@ -119,30 +138,41 @@ const disabledReason = computed(() => {
   return ''
 })
 
+const $q = useQuasar()
+
 function runDemoFill() {
   submitError.value = null
-  fillDemo(DEMO_FILES, DEMO_TITLE)
+  if (!hasRealFiles()) {
+    fillDemo(DEMO_FILES, DEMO_TITLE)
+    return
+  }
+  // Explicit switch: the demo never silently mixes with the user's documents.
+  $q.dialog({
+    title: 'Перейти к демонстрации?',
+    message: 'Загруженные документы будут убраны из формы. Демонстрация показывает заранее подготовленные данные — анализ документов не выполняется.',
+    cancel: { label: 'Отмена', flat: true, noCaps: true },
+    ok: { label: 'Перейти к демонстрации', flat: true, noCaps: true },
+    persistent: true,
+  }).onOk(() => fillDemo(DEMO_FILES, DEMO_TITLE))
+}
+
+function exitDemo() {
+  clearDemo()
 }
 
 async function submit() {
   if (disabledReason.value || submitting.value) return
   submitting.value = true
   submitError.value = null
-  const before = readyFiles('before')
-  const after = readyFiles('after')
+  const s = submission()
   try {
-    const created = await createAnalysis(
-      {
-        title: draft.title,
-        beforeFiles: before.flatMap((f) => (f.file ? [f.file] : [])),
-        afterFiles: after.flatMap((f) => (f.file ? [f.file] : [])),
-      },
-      isDemoDraft(),
-    )
-    runMeta.set(created.id, { before: before.length, after: after.length })
+    // Real mode always goes to the API; an API error is shown, never replaced by the demo.
+    const created = await createAnalysis({ title: s.title, beforeFiles: s.beforeFiles, afterFiles: s.afterFiles }, s.mode === 'demo')
+    rememberRun(created.id, s)
     await router.push({ name: 'run', params: { id: created.id } })
   } catch (error) {
-    const offline = error instanceof ApiError && error.kind !== 'http'
+    // 503: the API or its database is down — same recovery as no connection.
+    const offline = error instanceof ApiError && (error.kind !== 'http' || error.status === 503)
     submitError.value = { offline, message: error instanceof Error ? error.message : 'Неизвестная ошибка' }
   } finally {
     submitting.value = false

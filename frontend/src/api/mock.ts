@@ -1,7 +1,10 @@
+// Demo only: prepared data for showing the interface — no documents are analysed.
 // Local stand-in for the backend. Serves handoff/demo-analysis.json converted to the
 // docs/API_CONTRACT.md shape and simulates the five pipeline steps.
 import fixture from './fixtures/demo-analysis.json'
-import type { AgentTraceEntry, Analysis, AnalysisCreated, AnalysisStep, Finding, OrganizationChange } from './types'
+import type {
+  AgentTraceEntry, Analysis, AnalysisCreated, AnalysisStep, Finding, FunctionRegistry, OrganizationChange, StructuralRisk,
+} from './types'
 
 const MOCK_PREFIX = 'demo-'
 const QUEUE_MS = 600
@@ -84,6 +87,8 @@ export function getMockAnalysis(id: string): Analysis {
     summary: fixture.summary,
     organization_changes: fixture.organization_changes as OrganizationChange[],
     findings: fixture.findings as Finding[],
+    function_registry: fixture.function_registry as FunctionRegistry,
+    structural_risks: fixture.structural_risks as StructuralRisk[],
     conclusion: fixture.conclusion,
     warnings: fixture.warnings,
     agent_trace: TRACE,

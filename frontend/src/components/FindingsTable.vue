@@ -134,11 +134,11 @@
           <q-btn flat no-caps class="sv-btn sv-btn--secondary q-mt-sm" label="Сбросить фильтры" @click="resetFilters" />
         </template>
         <template v-else>
-          <q-icon name="check_circle" size="32px" style="color: var(--sv-low)" />
-          <span class="empty-title">Функциональных отклонений не найдено</span>
-          <span class="sv-small sv-muted" style="max-width: 520px">
-            Все {{ beforeCount }} {{ pluralize(beforeCount, FUNCS_WORD) }} комплекта «до» сохранены за теми же подразделениями с прежними
-            формулировками. Заключение готово к подтверждению.
+          <q-icon name="inbox" size="32px" style="color: var(--sv-icon-muted)" />
+          <span class="empty-title">Принятых функциональных отклонений нет</span>
+          <span class="sv-small sv-muted" style="max-width: 560px">
+            Это не подтверждает, что все {{ beforeCount }} {{ pluralize(beforeCount, FUNCS_WORD) }} комплекта «до» сохранены: проверьте
+            охват обработки и записи реестра, требующие проверки.
           </span>
         </template>
       </div>

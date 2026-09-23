@@ -2,12 +2,21 @@
   <q-page>
     <div v-if="pollError" class="sv-container q-pt-lg">
       <div role="alert" class="sv-banner sv-banner--err items-center">
-        <q-icon name="cloud_off" size="20px" />
+        <q-icon :name="pollErrorKind === 'not_found' ? 'search_off' : 'cloud_off'" size="20px" />
         <div class="col sv-col">
-          <b>Нет связи с сервисом анализа</b>
+          <b>{{ pollErrorKind === 'not_found' ? 'Анализ не найден' : 'Нет связи с сервисом анализа' }}</b>
           <span>{{ pollError }}</span>
+          <span v-if="analysis && pollErrorKind === 'unavailable'" class="sv-meta">Ниже — последнее полученное состояние; оно могло устареть.</span>
         </div>
-        <q-btn flat no-caps class="sv-btn sv-btn--secondary" icon="refresh" label="Повторить" @click="retry" />
+        <q-btn v-if="pollErrorKind !== 'not_found'" flat no-caps class="sv-btn sv-btn--secondary" icon="refresh" label="Повторить" @click="retry" />
+        <q-btn flat no-caps class="sv-btn sv-btn--secondary" icon="upload_file" label="Новый анализ" :to="{ name: 'new' }" />
+      </div>
+    </div>
+
+    <div v-if="demo" class="sv-container q-pt-md">
+      <div role="note" class="sv-banner sv-banner--demo items-center">
+        <q-icon name="dataset" size="20px" />
+        <span class="col"><b>{{ DEMO_NOTICE }}</b> Цифры, цитаты и журнал агентов взяты из подготовленного примера.</span>
       </div>
     </div>
 
@@ -23,9 +32,15 @@
           <div class="sv-col head-main">
             <h1 class="sv-h1">{{ title }}</h1>
             <div class="row items-center meta">
-              <span class="row items-center no-wrap status"><q-icon name="check_circle" size="18px" />Анализ завершён</span>
+              <span class="row items-center no-wrap status" title="Pipeline закончил работу. Это не означает, что все функции проверены.">
+                <q-icon name="check_circle" size="18px" />Обработка завершена
+              </span>
+              <span class="row items-center no-wrap coverage-chip" :class="`coverage-chip--${coverage.kind}`">
+                <q-icon :name="coverage.kind === 'complete' ? 'task_alt' : coverage.kind === 'incomplete' ? 'report_problem' : 'help_outline'" size="16px" />
+                {{ coverage.kind === 'complete' ? 'Охват: все фрагменты рассмотрены' : coverage.kind === 'incomplete' ? 'Охват неполный' : 'Охват неизвестен' }}
+              </span>
               <span v-if="durationMs" class="row items-center no-wrap"><q-icon name="timer" size="16px" class="sv-muted" />Время выполнения {{ formatDuration(durationMs) }}</span>
-              <span v-if="analysis.quality_score != null" class="row items-center no-wrap" title="Оценка качества результата агентом-критиком">
+              <span v-if="analysis.quality_score != null" class="row items-center no-wrap" title="Суждение LLM-контролёра, а не измеренная точность">
                 <q-icon name="fact_check" size="16px" class="sv-muted" />Оценка критика {{ Math.round(analysis.quality_score * 100) }}%
               </span>
               <span v-if="docsLabel" class="row items-center no-wrap"><q-icon name="description" size="16px" class="sv-muted" />{{ docsLabel }}</span>
@@ -78,7 +93,9 @@ import { useRoute, useRouter } from 'vue-router'
 import FindingDrawer from '@/components/FindingDrawer.vue'
 import { ANALYSIS_CTX, type TableFilters } from '@/composables/analysisContext'
 import { useAnalysis } from '@/composables/useAnalysis'
-import { runMeta } from '@/stores/draft'
+import { runSources } from '@/stores/draft'
+import { coverageState } from '@/utils/coverage'
+import { DEMO_NOTICE, isDemoId } from '@/utils/demo'
 import { department, sortFindings } from '@/utils/findings'
 import { DOCS_WORD, formatDuration, pluralize } from '@/utils/labels'
 
@@ -89,13 +106,16 @@ const router = useRouter()
 const handle = computed(() => useAnalysis(props.id))
 const analysis = computed(() => handle.value.analysis.value)
 const pollError = computed(() => handle.value.pollError.value)
+const pollErrorKind = computed(() => handle.value.pollErrorKind.value)
+const demo = computed(() => isDemoId(props.id))
+const coverage = computed(() => coverageState(analysis.value ?? {}))
 const durationMs = computed(() => handle.value.durationMs.value)
 const retry = () => handle.value.retry()
 
 const title = computed(() => analysis.value?.title || 'Анализ без названия')
 const showResultHeader = computed(() => analysis.value?.status === 'completed' && route.name !== 'run')
 const docsLabel = computed(() => {
-  const meta = runMeta.get(props.id)
+  const meta = runSources.get(props.id)
   if (!meta) return ''
   const total = meta.before + meta.after
   return `${total} ${pluralize(total, DOCS_WORD)}: ${meta.before} до, ${meta.after} после`
@@ -197,7 +217,11 @@ function print() {
 .head-row { gap: 12px 24px; flex-wrap: wrap; }
 .head-main { flex: 1 1 480px; gap: 8px; min-width: 0; }
 .meta { gap: 6px 16px; font-size: 13px; color: var(--sv-text-2); flex-wrap: wrap; > span { gap: 5px; } }
-.status { font-weight: 500; color: var(--sv-low); }
+.status { font-weight: 500; color: var(--sv-text-2); }
+.coverage-chip { gap: 4px; font-weight: 500; padding: 1px 8px; border-radius: 6px; border: 1px solid var(--sv-border); }
+.coverage-chip--incomplete { color: var(--sv-medium); background: var(--sv-medium-bg); border-color: var(--sv-medium-border); }
+.coverage-chip--complete { color: var(--sv-low); background: var(--sv-low-bg); border-color: var(--sv-low-border); }
+.coverage-chip--missing { color: var(--sv-muted); }
 .head-actions { gap: 8px; }
 .tabs { border-bottom: 1px solid var(--sv-border); color: var(--sv-muted); }
 .tab { padding: 0 12px; min-height: 42px; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px;

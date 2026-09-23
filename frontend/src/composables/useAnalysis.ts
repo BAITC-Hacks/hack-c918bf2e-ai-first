@@ -10,6 +10,8 @@ const MAX_CONSECUTIVE_FAILURES = 3
 export interface AnalysisHandle {
   analysis: Ref<Analysis | null>
   pollError: Ref<string | null>
+  /** 'not_found' — the server does not know this id; 'unavailable' — no answer / HTTP error. */
+  pollErrorKind: Ref<'not_found' | 'unavailable' | null>
   /** Wall-clock run time, known only when this tab watched the run finish. */
   durationMs: Ref<number | null>
   retry: () => void
@@ -29,6 +31,7 @@ export function useAnalysis(id: string): AnalysisHandle {
 
   const analysis = shallowRef<Analysis | null>(null)
   const pollError = ref<string | null>(null)
+  const pollErrorKind = ref<'not_found' | 'unavailable' | null>(null)
   const durationMs = ref<number | null>(null)
   let timer: number | undefined
   let failures = 0
@@ -42,6 +45,7 @@ export function useAnalysis(id: string): AnalysisHandle {
       analysis.value = data
       crumbTitle.value = data.title ?? ''
       pollError.value = null
+      pollErrorKind.value = null
       failures = 0
       const active = data.status === 'queued' || data.status === 'processing'
       if (active) sawRunning = true
@@ -56,8 +60,9 @@ export function useAnalysis(id: string): AnalysisHandle {
       failures += 1
       const notFound = error instanceof ApiError && error.status === 404
       if (notFound || failures >= MAX_CONSECUTIVE_FAILURES) {
+        pollErrorKind.value = notFound ? 'not_found' : 'unavailable'
         pollError.value = notFound
-          ? 'Анализ не найден. Возможно, сервис был перезапущен — запустите анализ заново.'
+          ? 'Сервер не знает анализ с таким идентификатором: ссылка неверна или результат не сохранился. Загрузите документы и запустите анализ заново.'
           : `${error instanceof Error ? error.message : 'Нет связи с сервисом'}. Опрос остановлен после ${MAX_CONSECUTIVE_FAILURES} попыток.`
         return
       }
@@ -75,10 +80,11 @@ export function useAnalysis(id: string): AnalysisHandle {
     stop()
     failures = 0
     pollError.value = null
+    pollErrorKind.value = null
     void tick(generation)
   }
 
-  const handle: AnalysisHandle = { analysis, pollError, durationMs, retry, stop }
+  const handle: AnalysisHandle = { analysis, pollError, pollErrorKind, durationMs, retry, stop }
   cache.set(id, handle)
   crumbTitle.value = ''
   retry()

@@ -3,18 +3,23 @@
     <div class="sv-banner sv-banner--warn">
       <q-icon name="info" />
       <span class="col">
-        Выводы сформированы ИИ-агентом и носят рекомендательный характер. Каждый вывод подтверждён цитатой из документа;
-        решение принимает ответственный сотрудник.
+        Выводы сформированы ИИ-агентом и носят рекомендательный характер. Каждый принятый вывод опирается на цитату из
+        документа; решение принимает ответственный сотрудник.
       </span>
     </div>
+
+    <CoverageSummary :analysis="analysis" @show-review="showReview" />
 
     <SummaryStrip
       v-if="analysis.summary"
       :summary="analysis.summary"
       :active="filters.types.length === 1 ? filters.types[0] : null"
+      :risks-in-edition="analysis.structural_risks?.length ?? null"
       @show-high="showHigh"
       @toggle-type="toggleType"
     />
+
+    <StructuralRisks :analysis="analysis" />
 
     <AgentTrace
       v-if="analysis.agent_trace?.length || analysis.quality_score != null"
@@ -24,7 +29,12 @@
 
     <OrgMap :changes="analysis.organization_changes ?? []" />
 
-    <FunctionRegistry v-if="analysis.function_registry" :registry="analysis.function_registry" />
+    <FunctionRegistry
+      v-if="analysis.function_registry"
+      id="registry"
+      :registry="analysis.function_registry"
+      :review-request="reviewRequest"
+    />
 
     <div class="sv-col" style="gap: 12px">
       <FindingsTable :before-count="analysis.summary?.before_functions ?? 0" />
@@ -41,11 +51,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import AgentTrace from '@/components/AgentTrace.vue'
+import CoverageSummary from '@/components/CoverageSummary.vue'
 import FindingsTable from '@/components/FindingsTable.vue'
 import FunctionRegistry from '@/components/FunctionRegistry.vue'
 import OrgMap from '@/components/OrgMap.vue'
+import StructuralRisks from '@/components/StructuralRisks.vue'
 import SummaryStrip from '@/components/SummaryStrip.vue'
 import type { FindingType } from '@/api/types'
 import { useAnalysisContext } from '@/composables/analysisContext'
@@ -59,6 +71,15 @@ async function scrollToTable() {
   await nextTick()
   const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
   document.getElementById('findings')?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
+}
+
+// Each click bumps the counter so the registry switches to «требует проверки» again.
+const reviewRequest = ref(0)
+async function showReview() {
+  reviewRequest.value += 1
+  await nextTick()
+  const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  document.getElementById('registry')?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' })
 }
 
 function showHigh() {

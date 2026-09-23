@@ -164,3 +164,6 @@ html[data-theme=dark] .sv-risk--high { background: var(--sv-high); color: #16182
 .sv-drawer-dialog .q-dialog__inner--right { padding: 0 !important; }
 .sv-drawer-dialog .q-dialog__inner > div { max-height: 100vh !important; border-radius: 0 !important; }
 .sv-drawer-dialog .q-dialog__backdrop { background: var(--sv-backdrop); }
+
+// Demo runs: prepared data, no document analysis. Accent-tinted so it never reads as a result.
+.sv-banner--demo { background: var(--sv-accent-tint); border-color: var(--sv-accent-border); color: var(--sv-accent-strong); > .q-icon { color: var(--sv-accent); } }

@@ -36,7 +36,7 @@ export const STEP_META: Record<StepStatus, { label: string; icon: string; fg: st
 
 /** One-line explanations for the five pipeline stages, by position. */
 export const STEP_NOTES = [
-  'Читаем текст из DOCX, PDF и XLSX, сохраняем номера пунктов и страниц.',
+  'Читаем текст из DOCX, PDF и XLSX, сохраняем номера пунктов и, где они есть, страниц.',
   'Находим подразделения и перечень функций каждого из них.',
   'Сравниваем функции «до» и «после» по смыслу, а не по совпадению слов.',
   'Для каждого вывода ищем точную цитату. Выводы без цитаты исключаются.',

@@ -14,18 +14,19 @@
         <div class="row items-baseline">
           <span class="sv-small sv-text-2">{{ currentLabel }}</span>
           <q-space />
-          <span class="pct tabular">{{ analysis.progress }}%</span>
+          <span class="pct tabular">{{ stageLabel }}</span>
         </div>
         <div
           role="progressbar"
           :aria-valuenow="analysis.progress"
           aria-valuemin="0"
           aria-valuemax="100"
-          aria-label="Общий прогресс"
+          aria-label="Этап обработки"
           class="bar"
         >
           <div :style="{ width: `${analysis.progress}%`, background: failed ? 'var(--sv-high)' : 'var(--sv-accent)' }" />
         </div>
+        <span class="sv-meta">Полоса показывает этап обработки по данным сервера ({{ analysis.progress }}%), а не прогноз времени.</span>
       </div>
 
       <ol class="steps sv-card">
@@ -47,9 +48,10 @@
             <div v-if="step.status === 'failed'" role="alert" class="step-error sv-col">
               <span>{{ errorText }}</span>
               <div class="row step-error-actions">
-                <q-btn flat no-caps class="sv-btn sv-btn--primary" icon="refresh" label="Повторить запуск" :loading="restarting" @click="restart" />
-                <q-btn flat no-caps class="sv-btn sv-btn--ghost" label="Вернуться к загрузке" :to="{ name: 'new' }" />
+                <q-btn v-if="plan.kind !== 'reupload'" flat no-caps class="sv-btn sv-btn--primary" icon="refresh" label="Повторить запуск" :loading="restarting" @click="restart" />
+                <q-btn flat no-caps :class="['sv-btn', plan.kind === 'reupload' ? 'sv-btn--primary' : 'sv-btn--ghost']" :icon="plan.kind === 'reupload' ? 'upload_file' : undefined" :label="plan.kind === 'reupload' ? 'Загрузить документы заново' : 'Вернуться к загрузке'" :to="{ name: 'new' }" />
               </div>
+              <span v-if="plan.kind === 'reupload'" class="sv-meta">{{ REUPLOAD_NOTE }}</span>
             </div>
           </div>
           <span class="step-status" :style="{ color: STEP_META[step.status].fg }">{{ STEP_META[step.status].label }}</span>
@@ -65,8 +67,12 @@
       <!-- Failure without a failed step in the payload (e.g. steps: []) -->
       <div v-if="failed && !hasFailedStep" role="alert" class="sv-banner sv-banner--err items-center">
         <q-icon name="error_outline" size="20px" />
-        <span class="col">{{ errorText }}</span>
-        <q-btn flat no-caps class="sv-btn sv-btn--secondary" icon="refresh" label="Повторить запуск" :loading="restarting" @click="restart" />
+        <div class="col sv-col">
+          <span>{{ errorText }}</span>
+          <span v-if="plan.kind === 'reupload'" class="sv-meta">{{ REUPLOAD_NOTE }}</span>
+        </div>
+        <q-btn v-if="plan.kind !== 'reupload'" flat no-caps class="sv-btn sv-btn--secondary" icon="refresh" label="Повторить запуск" :loading="restarting" @click="restart" />
+        <q-btn v-else flat no-caps class="sv-btn sv-btn--secondary" icon="upload_file" label="Загрузить документы заново" :to="{ name: 'new' }" />
       </div>
     </div>
 
@@ -80,7 +86,7 @@
         <q-icon name="logout" size="20px" style="color: var(--sv-accent)" />
         <div class="sv-col" style="gap: 8px">
           <span class="leave-title">Можно закрыть страницу</span>
-          <span class="sv-meta">Анализ продолжится на сервере. Результат откроется по ссылке на этот анализ.</span>
+          <span class="sv-meta">Обработка идёт на сервере. Результат откроется по ссылке, пока сервер хранит этот анализ.</span>
           <q-btn flat no-caps class="sv-btn sv-btn--ghost self-start" style="margin-left: -8px" icon="link" label="Скопировать ссылку" @click="copyLink" />
         </div>
       </div>
@@ -95,21 +101,32 @@ import { copyToClipboard, useQuasar } from 'quasar'
 import AgentTrace from '@/components/AgentTrace.vue'
 import { createAnalysis } from '@/api/client'
 import { useAnalysisContext } from '@/composables/analysisContext'
-import { draft, isDemoDraft, readyFiles, runMeta } from '@/stores/draft'
+import { rememberRun, retryPlan, runSources } from '@/stores/draft'
 import { FILES, STEP_META, STEP_NOTES, formatClock, pluralize } from '@/utils/labels'
-import { isMockId } from '@/api/mock'
+
+const REUPLOAD_NOTE =
+  'Исходные файлы этого анализа недоступны: страница обновлялась или анализ открыт по ссылке. ' +
+  'Браузер не хранит документы — загрузите их заново.'
 
 const { analysis } = useAnalysisContext()
 const router = useRouter()
 const $q = useQuasar()
 
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-const meta = computed(() => (analysis.value ? runMeta.get(analysis.value.id) : undefined))
+const meta = computed(() => (analysis.value ? runSources.get(analysis.value.id) : undefined))
+const plan = computed(() => retryPlan(analysis.value?.id ?? ''))
+const stageLabel = computed(() => {
+  const steps = analysis.value?.steps ?? []
+  if (!steps.length) return ''
+  const active = steps.findIndex((s) => s.status === 'processing' || s.status === 'failed')
+  const index = active >= 0 ? active + 1 : steps.filter((s) => s.status === 'completed').length
+  return `Этап ${Math.max(index, 1)} из ${steps.length}`
+})
 const failed = computed(() => analysis.value?.status === 'failed')
 const hasFailedStep = computed(() => analysis.value?.steps.some((s) => s.status === 'failed') ?? false)
 const kicker = computed(() => {
   if (failed.value) return 'Анализ остановлен'
-  if (analysis.value?.status === 'completed') return 'Анализ завершён'
+  if (analysis.value?.status === 'completed') return 'Обработка завершена'
   return 'Анализ выполняется'
 })
 const currentLabel = computed(() => {
@@ -122,7 +139,14 @@ const currentLabel = computed(() => {
   }
   return `Сейчас: ${a.current_step}`
 })
-const errorText = computed(() => analysis.value?.error?.message || 'Анализ остановлен из-за внутренней ошибки.')
+const errorText = computed(() => {
+  const error = analysis.value?.error
+  if (error?.code === 'ANALYSIS_INTERRUPTED') {
+    return 'Обработка была прервана (например, перезапуском сервиса). Автоматического продолжения нет — запустите анализ заново.'
+  }
+  const message = error?.message || 'Анализ остановлен из-за внутренней ошибки.'
+  return error?.code ? `${message} (код: ${error.code})` : message
+})
 
 // Elapsed time only, no forecast.
 const now = ref(Date.now())
@@ -145,27 +169,25 @@ async function copyLink() {
   }
 }
 
-// The contract has no restart endpoint: resubmit the files still held in the form.
+// The contract has no restart endpoint: resend exactly this run's files (see retryPlan).
 const restarting = ref(false)
 async function restart() {
-  const before = readyFiles('before')
-  const after = readyFiles('after')
-  const demo = analysis.value ? isMockId(analysis.value.id) : false
-  if (!demo && (!before.length || !after.length)) {
+  const p = plan.value
+  if (p.kind === 'reupload') {
     await router.push({ name: 'new' })
     return
   }
   restarting.value = true
   try {
-    const created = await createAnalysis(
-      {
-        title: draft.title || analysis.value?.title,
-        beforeFiles: before.flatMap((f) => (f.file ? [f.file] : [])),
-        afterFiles: after.flatMap((f) => (f.file ? [f.file] : [])),
-      },
-      demo || isDemoDraft(),
-    )
-    runMeta.set(created.id, { before: before.length, after: after.length })
+    const title = p.title || analysis.value?.title || ''
+    const beforeFiles = p.kind === 'resend' ? p.before : []
+    const afterFiles = p.kind === 'resend' ? p.after : []
+    const created = await createAnalysis({ title, beforeFiles, afterFiles }, p.kind === 'demo')
+    const old = runSources.get(analysis.value?.id ?? '')
+    rememberRun(created.id, {
+      mode: p.kind === 'demo' ? 'demo' : 'real', title, beforeFiles, afterFiles,
+      beforeCount: old?.before ?? beforeFiles.length, afterCount: old?.after ?? afterFiles.length,
+    })
     await router.replace({ name: 'run', params: { id: created.id } })
   } catch (error) {
     $q.notify({ message: error instanceof Error ? error.message : 'Не удалось перезапустить анализ', icon: 'error_outline' })
@@ -190,7 +212,7 @@ async function restart() {
   b { font-weight: 600; font-size: 11px; letter-spacing: .06em; }
 }
 .progress-box { gap: 8px; }
-.pct { font-size: 22px; font-weight: 500; }
+.pct { font-size: 18px; font-weight: 500; }
 .bar { height: 6px; background: var(--sv-divider); border-radius: 3px; overflow: hidden;
   div { height: 100%; transition: width .3s ease-out; } }
 .steps { list-style: none; margin: 0; padding: 0; overflow: hidden; }

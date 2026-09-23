@@ -110,6 +110,26 @@ export interface FunctionRegistry {
   }
 }
 
+/** Potential risk inside one edition (usually ПОСЛЕ). Separate from Finding: not a before/after change. */
+export type StructuralRiskKind = 'duplicate' | 'conflict_interest'
+
+export interface RiskEvidence {
+  side: DocumentSide
+  evidence: Evidence
+}
+
+export interface StructuralRisk {
+  id: string
+  kind: StructuralRiskKind
+  severity: Severity
+  title: string
+  explanation: string
+  confidence: number
+  /** 2–6 verified quotes; two «после» references is a valid case. */
+  evidence: RiskEvidence[]
+  recommendation: string
+}
+
 export interface Analysis {
   id: string
   title?: string
@@ -126,6 +146,8 @@ export interface Analysis {
   agent_trace?: AgentTraceEntry[]
   quality_score?: number | null
   function_registry?: FunctionRegistry | null
+  /** undefined/null — block not provided (older result or not ready); [] — none accepted, not proof of absence. */
+  structural_risks?: StructuralRisk[] | null
   error?: AnalysisError | null
 }
 

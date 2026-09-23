@@ -7,9 +7,17 @@ export function department(f: Finding): string {
   return f.after?.department ?? f.before?.department ?? '—'
 }
 
+/**
+ * Clause locators are strings («3.4», «абзац 12», «таблица 2, строка 3», «Лист1!7»):
+ * only a printed number gets the «п.» prefix, nothing is parsed or renumbered.
+ */
+export function locatorLabel(clause: string): string {
+  return /^\d/.test(clause.trim()) ? `п. ${clause.trim()}` : clause.trim()
+}
+
 export function clauseLabel(e: Evidence | null | undefined): string {
   if (!e) return '—'
-  const parts = [e.clause ? `п. ${e.clause}` : null, e.page ? `стр. ${e.page}` : null].filter(Boolean)
+  const parts = [e.clause ? locatorLabel(e.clause) : null, e.page ? `стр. ${e.page}` : null].filter(Boolean)
   return parts.length ? parts.join(' · ') : 'пункт не указан'
 }
 
@@ -35,7 +43,7 @@ export function isQcWarning(message: string): boolean {
 
 /** Plain-text citation used by "Копировать цитату со ссылкой". */
 export function citation(e: Evidence): string {
-  const where = [e.document, e.clause ? `п. ${e.clause}` : null, e.page ? `стр. ${e.page}` : null].filter(Boolean).join(', ')
+  const where = [e.document, e.clause ? locatorLabel(e.clause) : null, e.page ? `стр. ${e.page}` : null].filter(Boolean).join(', ')
   return `«${e.quote}» — ${where}${e.department ? ` (${e.department})` : ''}`
 }
 

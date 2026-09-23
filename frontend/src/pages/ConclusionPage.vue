@@ -1,11 +1,23 @@
 <template>
   <div v-if="analysis && model" class="sv-container page layout">
     <article class="sv-card doc sv-col">
+      <div v-if="model.demo" role="note" class="demo-mark">
+        <q-icon name="dataset" size="18px" />{{ DEMO_NOTICE }}
+      </div>
       <div class="sv-col" style="gap: 6px">
         <span class="sv-overline">Аналитическое заключение</span>
         <h2 class="doc-title">{{ analysis.title || 'Анализ без названия' }}</h2>
         <span class="sv-small sv-muted">{{ metaLine }}</span>
       </div>
+
+      <section class="limits" :class="`limits--${model.coverage.kind}`" aria-labelledby="limits-h">
+        <h3 id="limits-h" class="limits-title row items-center no-wrap">
+          <q-icon :name="model.coverage.kind === 'complete' ? 'info' : 'report_problem'" size="18px" />Ограничения результата
+        </h3>
+        <ul>
+          <li v-for="(l, i) in model.limitations" :key="i">{{ l }}</li>
+        </ul>
+      </section>
 
       <section class="sec">
         <span class="num tabular">01</span>
@@ -30,7 +42,7 @@
               <span class="risk-id row items-center no-wrap">{{ labelOf(f.id) }}<q-icon name="chevron_right" size="16px" /></span>
             </button>
           </div>
-          <p v-else class="para">Отклонений высокого риска не выявлено.</p>
+          <p v-else class="para">В принятых выводах нет отклонений высокого риска.</p>
         </div>
       </section>
 
@@ -45,9 +57,31 @@
       <section class="sec">
         <span class="num tabular">04</span>
         <div class="sv-col sec-body">
-          <h3 class="sec-title">Потенциальные конфликты интересов</h3>
+          <h3 class="sec-title">Потенциальные риски внутри редакции</h3>
+          <p class="para">{{ model.risks.headline }}</p>
+          <template v-if="model.risks.kind === 'present'">
+            <span class="sv-meta">{{ RISKS_CAVEAT }}</span>
+            <ol class="list risks-list">
+              <li v-for="r in model.risks.risks" :key="r.id">
+                <div class="row items-center risk-line">
+                  <span class="risk-kind" :class="`risk-kind--${r.kind}`"><q-icon :name="RISK_KIND_META[r.kind].icon" size="15px" />{{ RISK_KIND_META[r.kind].label }}</span>
+                  <span class="sv-meta">{{ SEVERITY_META[r.severity].label }} риск · {{ r.id }}</span>
+                </div>
+                <b class="risk-name">{{ r.title }}.</b> {{ r.explanation }}
+                <ul class="risk-sources">
+                  <li v-for="(item, i) in r.evidence" :key="i">
+                    <span class="src">{{ riskSourceLine(item) }}</span> — «{{ item.evidence.quote }}»
+                  </li>
+                </ul>
+                <div class="risk-reco">
+                  Рекомендация: {{ r.recommendation }}
+                  <span class="confirm"><q-icon name="person_search" size="13px" />требует подтверждения</span>
+                </div>
+              </li>
+            </ol>
+          </template>
           <template v-if="model.conflicts.length">
-            <span class="sv-meta">Выводы «Дублирование» требуют отдельной проверки: пересечение функций само по себе не доказывает конфликт интересов.</span>
+            <span class="sv-meta">{{ LEGACY_DUPLICATE_NOTE }}</span>
             <ol class="list">
               <li v-for="f in model.conflicts" :key="f.id">
                 {{ f.explanation }}
@@ -55,7 +89,6 @@
               </li>
             </ol>
           </template>
-          <p v-else class="para">В принятых находках пересечения не указаны. Отсутствие конфликта интересов не подтверждено.</p>
         </div>
       </section>
 
@@ -77,6 +110,7 @@
       <footer class="disclaimer">
         Заключение сформировано ИИ-агентом «Сверка» и носит рекомендательный характер. Выводы подлежат проверке
         ответственным сотрудником до принятия решения.
+        <template v-if="model.demo"><br /><b>{{ DEMO_NOTICE }}</b></template>
       </footer>
     </article>
 
@@ -87,7 +121,10 @@
         <span class="sv-overline sv-overline--muted">Контроль качества</span>
         <div v-if="analysis.quality_score != null" class="qc-item">
           <q-icon name="fact_check" size="17px" style="color: var(--sv-accent)" />
-          <span>Оценка критика: <b class="tabular">{{ Math.round(analysis.quality_score * 100) }}%</b>{{ revisionNote }}</span>
+          <span>
+            Оценка критика: <b class="tabular">{{ Math.round(analysis.quality_score * 100) }}%</b>{{ revisionNote }}
+            <span class="sv-muted">Это суждение LLM-контролёра, а не измеренная точность.</span>
+          </span>
         </div>
         <div v-for="(w, i) in warnings" :key="i" class="qc-item">
           <q-icon :name="isQcWarning(w) ? 'rule' : 'info'" size="17px" :style="{ color: isQcWarning(w) ? 'var(--sv-medium)' : 'var(--sv-muted)' }" />
@@ -104,10 +141,12 @@ import { computed } from 'vue'
 import { copyToClipboard, useQuasar } from 'quasar'
 import TypeLabel from '@/components/TypeLabel.vue'
 import { useAnalysisContext } from '@/composables/analysisContext'
-import { buildConclusion, conclusionPlainText, sourceLine } from '@/utils/conclusion'
+import { LEGACY_DUPLICATE_NOTE, buildConclusion, conclusionPlainText, sourceLine } from '@/utils/conclusion'
+import { RISKS_CAVEAT, RISK_KIND_META, riskSourceLine } from '@/utils/risks'
+import { DEMO_NOTICE } from '@/utils/demo'
 import { isQcWarning } from '@/utils/findings'
 import { revisionOutcome } from '@/utils/trace'
-import { FINDINGS_WORD, pluralize } from '@/utils/labels'
+import { FINDINGS_WORD, SEVERITY_META, pluralize } from '@/utils/labels'
 
 const { analysis, openFinding, labelOf } = useAnalysisContext()
 const $q = useQuasar()
@@ -175,6 +214,23 @@ function print() {
   border: 1px solid var(--sv-medium-border); background: var(--sv-medium-bg); border-radius: 5px; padding: 1px 6px; vertical-align: 2px;
   white-space: nowrap;
 }
+.risks-list > li { padding-left: 4px; }
+.risk-line { gap: 8px; margin-bottom: 2px; }
+.risk-kind { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; }
+.risk-kind--duplicate { color: var(--sv-duplicate); }
+.risk-kind--conflict_interest { color: var(--sv-medium); }
+.risk-name { font-weight: 500; }
+.risk-sources { margin: 6px 0; padding-left: 18px; font-size: 13px; line-height: 1.5; color: var(--sv-text-2); .src { color: var(--sv-text); font-weight: 500; } }
+.risk-reco { font-size: 14px; }
+.demo-mark {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px; font-size: 13px; font-weight: 600;
+  background: var(--sv-accent-tint); color: var(--sv-accent-strong); border: 1px solid var(--sv-accent-border);
+}
+.limits { padding: 12px 14px; border: 1px solid var(--sv-divider); border-radius: 8px; background: var(--sv-sunken);
+  ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.55; color: var(--sv-text-2); display: flex; flex-direction: column; gap: 2px; } }
+.limits--incomplete { background: var(--sv-medium-bg); border-color: var(--sv-medium-border); .limits-title { color: var(--sv-medium-text); } }
+.limits-title { gap: 6px; font-size: 14px; font-weight: 600; }
+@media print { .demo-mark, .limits { break-inside: avoid; -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 .disclaimer { font-size: 12px; line-height: 1.5; color: var(--sv-muted); border-top: 1px solid var(--sv-divider); padding-top: 14px; }
 .qc { padding: 14px 16px; gap: 10px; }
 .qc-item { display: grid; grid-template-columns: 20px 1fr; gap: 8px; font-size: 12px; line-height: 1.5; color: var(--sv-text-2); }

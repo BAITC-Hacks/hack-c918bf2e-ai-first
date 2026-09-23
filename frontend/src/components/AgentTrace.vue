@@ -7,7 +7,7 @@
         <q-icon :name="outcomeIcon" />{{ outcomeLabel }}
       </span>
       <q-space />
-      <span v-if="qualityScore != null" class="score row items-center no-wrap" title="Оценка качества результата агентом-критиком">
+      <span v-if="qualityScore != null" class="score row items-center no-wrap" title="Суждение LLM-контролёра, а не измеренная точность">
         <q-icon name="fact_check" size="16px" class="sv-muted" />Оценка критика
         <b class="tabular">{{ Math.round(qualityScore * 100) }}%</b>
       </span>
@@ -44,6 +44,7 @@
 
     <footer class="foot sv-meta">
       Показаны только итоги шагов. Внутренние инструкции моделей и промежуточные рассуждения не отображаются.
+      Оценка критика — суждение LLM-контролёра, а не измеренная точность.
     </footer>
   </section>
 </template>
