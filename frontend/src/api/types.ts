@@ -67,6 +67,49 @@ export interface AnalysisError {
   message: string
 }
 
+export type DocumentSide = 'before' | 'after'
+export type MappingStatus = 'unchanged' | 'moved' | 'changed' | 'lost' | 'added' | 'needs_review'
+
+export interface ExtractedFunction {
+  id: string
+  source_id: string
+  side: DocumentSide
+  action: string
+  owner: string | null
+  evidence: Evidence
+}
+
+export interface SourceReview {
+  source_id: string
+  side: DocumentSide
+  document: string
+  clause: string
+  status: 'functions' | 'non_functional' | 'needs_review'
+  reason: string
+}
+
+export interface FunctionMapping {
+  before_id: string | null
+  after_ids: string[]
+  status: MappingStatus
+  explanation: string
+}
+
+export interface FunctionRegistry {
+  functions: ExtractedFunction[]
+  source_reviews: SourceReview[]
+  mappings: FunctionMapping[]
+  coverage: {
+    total_fragments: number
+    reviewed_fragments: number
+    unresolved_fragments: number
+    before_functions: number
+    after_functions: number
+    matched_before_functions: number
+    needs_review_mappings: number
+  }
+}
+
 export interface Analysis {
   id: string
   title?: string
@@ -82,6 +125,7 @@ export interface Analysis {
   warnings?: string[]
   agent_trace?: AgentTraceEntry[]
   quality_score?: number | null
+  function_registry?: FunctionRegistry | null
   error?: AnalysisError | null
 }
 

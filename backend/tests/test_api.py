@@ -8,6 +8,7 @@ from app import main, pipeline
 from app.analyzer import ComparisonDraft, EvidenceDraft, FindingDraft, QualityAssessment
 from app.config import Settings
 from app.main import app
+from app.registry import FunctionLinkDraft
 
 client = TestClient(app)
 
@@ -29,7 +30,9 @@ def test_analysis_requires_supported_documents() -> None:
     assert response.status_code == 415
 
 
-def test_upload_to_completed_report_with_stubbed_provider(tmp_path, monkeypatch) -> None:
+def test_upload_to_completed_report_with_stubbed_provider(
+    tmp_path, monkeypatch, stub_registry_model
+) -> None:
     """Real upload/parser/orchestrator/store/API; only external model calls are stubbed."""
     monkeypatch.setattr(
         main,
@@ -57,6 +60,14 @@ def test_upload_to_completed_report_with_stubbed_provider(tmp_path, monkeypatch)
             )
         ],
         conclusion="Черновик",
+        function_links=[
+            FunctionLinkDraft(
+                before_id="B0001-F01",
+                after_ids=["A0001-F01"],
+                status="changed",
+                explanation="Изменена периодичность",
+            )
+        ],
     )
     monkeypatch.setattr(pipeline, "analyze_with_openai", lambda *args: comparison)
     monkeypatch.setattr(
@@ -96,3 +107,6 @@ def test_upload_to_completed_report_with_stubbed_provider(tmp_path, monkeypatch)
         assert result["findings"][0]["before"]["quote"] == "ежемесячный отчёт"
         assert "before.docx, 2.1" in result["conclusion"]
         assert result["agent_trace"]
+        assert result["function_registry"]["coverage"]["matched_before_functions"] == 1
+        assert result["function_registry"]["coverage"]["reviewed_fragments"] == 2
+        assert all(step["status"] == "completed" for step in result["steps"])

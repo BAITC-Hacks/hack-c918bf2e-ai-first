@@ -7,6 +7,7 @@ from app import pipeline
 from app.analyzer import ComparisonDraft, EvidenceDraft, FindingDraft, QualityAssessment
 from app.config import Settings
 from app.documents import Clause
+from app.registry import FunctionLinkDraft
 from app.schemas import FindingType, Severity
 
 
@@ -28,6 +29,15 @@ def draft(quote: str = "Контролирует риски") -> ComparisonDraft
             )
         ],
         conclusion="НЕПРОВЕРЕННОЕ УТВЕРЖДЕНИЕ",
+        function_links=[
+            FunctionLinkDraft(
+                before_id="B0001-F01",
+                after_ids=[],
+                status="lost",
+                explanation="Не найдена в новом комплекте",
+            )
+        ],
+        added_after_ids=["A0001-F01"],
     )
 
 
@@ -52,7 +62,7 @@ def documents(tmp_path: Path) -> tuple[list[Path], list[Path]]:
 def test_judge_cannot_overrule_invalid_quote(monkeypatch) -> None:
     calls = []
 
-    def critic(comparison, settings, before, after, issues):
+    def critic(comparison, settings, before, after, issues, registry=None):
         calls.append((before, after, issues))
         return assessment()
 
@@ -67,7 +77,7 @@ def test_judge_cannot_overrule_invalid_quote(monkeypatch) -> None:
 
 
 def test_full_pipeline_repairs_invalid_quote_and_reports_only_accepted_claims(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, stub_registry_model
 ):
     before, after = documents(tmp_path)
     monkeypatch.setattr(pipeline, "analyze_with_openai", lambda *args: draft("Выдумка"))
@@ -88,7 +98,7 @@ def test_full_pipeline_repairs_invalid_quote_and_reports_only_accepted_claims(
     assert any(item.action == "accept_revision" for item in result.agent_trace)
 
 
-def test_exhausted_repair_drops_claim_from_report(tmp_path, monkeypatch):
+def test_exhausted_repair_drops_claim_from_report(tmp_path, monkeypatch, stub_registry_model):
     before, after = documents(tmp_path)
     monkeypatch.setattr(pipeline, "analyze_with_openai", lambda *args: draft("Выдумка"))
     monkeypatch.setattr(pipeline, "assess_quality_with_openai", lambda *args: assessment())

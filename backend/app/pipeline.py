@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
@@ -13,13 +14,16 @@ from app.analyzer import (
     revise_with_openai,
 )
 from app.config import Settings
-from app.documents import Clause, parse_documents
+from app.documents import Clause, match_source_quote, parse_documents
+from app.registry import extract_registry, match_registry, reconcile_mappings
 from app.schemas import (
     AgentTraceEntry,
     AnalysisSummary,
     Evidence,
     Finding,
     FindingType,
+    FunctionRegistry,
+    MappingStatus,
     OrganizationChange,
     OrganizationChangeStatus,
     Severity,
@@ -35,6 +39,7 @@ class PipelineResult:
     warnings: list[str]
     agent_trace: list[AgentTraceEntry]
     quality_score: float
+    function_registry: FunctionRegistry
 
 
 def normalize(value: str) -> str:
@@ -64,11 +69,9 @@ def verify_evidence(
     if len(candidates) != 1 or not draft.quote.strip():
         return None
     clause = candidates[0]
-    pattern = r"\s+".join(re.escape(word) for word in draft.quote.split())
-    match = re.search(pattern, clause.text, re.IGNORECASE)
-    if match is None:
+    exact_quote = match_source_quote(draft.quote, clause.text)
+    if exact_quote is None:
         return None
-    exact_quote = clause.text[match.start() : match.end()]
     return Evidence(
         department=draft.department,
         clause=clause.clause,
@@ -189,7 +192,10 @@ def build_organization_changes(
 
 
 def source_issues(
-    comparison: ComparisonDraft, before: list[Clause], after: list[Clause]
+    comparison: ComparisonDraft,
+    before: list[Clause],
+    after: list[Clause],
+    registry: FunctionRegistry | None = None,
 ) -> list[QualityIssue]:
     """Deterministic checks run before the LLM judge and cannot be overruled by it."""
     indexes = {"before": evidence_index(before), "after": evidence_index(after)}
@@ -223,14 +229,42 @@ def source_issues(
                 revision_instruction="Проверь наличие обязательных источников для каждого типа вывода.",
             )
         )
+    if registry is not None:
+        reconciled = reconcile_mappings(
+            registry, comparison.function_links, comparison.added_after_ids
+        )
+        before_ids = {item.id for item in registry.functions if item.side == "before"}
+        after_ids = {item.id for item in registry.functions if item.side == "after"}
+        invalid_ids = any(
+            item.before_id not in before_ids
+            or any(target not in after_ids for target in item.after_ids)
+            for item in comparison.function_links
+        ) or any(item not in after_ids for item in comparison.added_after_ids)
+        if reconciled.coverage.needs_review_mappings or invalid_ids:
+            issues.append(
+                QualityIssue(
+                    category="coverage",
+                    message=f"Требуют проверки сопоставления: {reconciled.coverage.needs_review_mappings}; "
+                    f"невалидные ID: {'да' if invalid_ids else 'нет'}.",
+                    revision_instruction=(
+                        "Проверь все function_links и added_after_ids по реестру. "
+                        "Дополни пропущенные пары; при реальной неопределённости "
+                        "сохрани needs_review, не выдумывай подтверждение."
+                    ),
+                )
+            )
     return issues
 
 
 def evaluate_comparison(
-    comparison: ComparisonDraft, before: list[Clause], after: list[Clause], settings: Settings
+    comparison: ComparisonDraft,
+    before: list[Clause],
+    after: list[Clause],
+    settings: Settings,
+    registry: FunctionRegistry | None = None,
 ) -> QualityAssessment:
-    issues = source_issues(comparison, before, after)
-    assessment = assess_quality_with_openai(comparison, settings, before, after, issues)
+    issues = source_issues(comparison, before, after, registry)
+    assessment = assess_quality_with_openai(comparison, settings, before, after, issues, registry)
     if issues:
         assessment.passed = False
         assessment.score = min(assessment.score, 0.49)
@@ -275,7 +309,16 @@ def build_conclusion(
     return "\n\n".join(lines)
 
 
-def analyze_documents(before: list[Path], after: list[Path], settings: Settings) -> PipelineResult:
+def analyze_documents(
+    before: list[Path],
+    after: list[Path],
+    settings: Settings,
+    on_stage: Callable[[str, int], None] | None = None,
+) -> PipelineResult:
+    def stage(code: str, progress: int) -> None:
+        if on_stage:
+            on_stage(code, progress)
+
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY не настроен")
     trace = [
@@ -289,6 +332,7 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
             ),
         )
     ]
+    stage("extract", 5)
     before_clauses = parse_documents(before)
     after_clauses = parse_documents(after)
     if not before_clauses or not after_clauses:
@@ -301,7 +345,36 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
             summary=f"Извлечено фрагментов: до — {len(before_clauses)}, после — {len(after_clauses)}.",
         )
     )
+    stage("structure", 20)
+    registry = extract_registry(before_clauses, after_clauses, settings)
+    trace.append(
+        AgentTraceEntry(
+            agent="function_extractor",
+            action="inventory",
+            status="completed",
+            summary=(
+                f"Извлечено функций ДО/ПОСЛЕ: {registry.coverage.before_functions}/"
+                f"{registry.coverage.after_functions}. Рассмотрено фрагментов: "
+                f"{registry.coverage.reviewed_fragments}/{registry.coverage.total_fragments}."
+            ),
+        )
+    )
+    stage("compare", 45)
+    function_links, added_ids = match_registry(registry, settings)
+    trace.append(
+        AgentTraceEntry(
+            agent="function_matcher",
+            action="match_inventory",
+            status="completed",
+            summary=f"Пакетное сопоставление: получено решений ДО — {len(function_links)}; "
+            f"явно новых записей ПОСЛЕ — {len(added_ids)}.",
+        )
+    )
     comparison = analyze_with_openai(before_clauses, after_clauses, settings)
+    comparison.function_links = function_links
+    comparison.added_after_ids = added_ids
+    comparison.before_function_count = registry.coverage.before_functions
+    comparison.after_function_count = registry.coverage.after_functions
     trace.append(
         AgentTraceEntry(
             agent="comparison_agent",
@@ -314,7 +387,8 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
         )
     )
 
-    initial_source_issues = source_issues(comparison, before_clauses, after_clauses)
+    stage("verify", 70)
+    initial_source_issues = source_issues(comparison, before_clauses, after_clauses, registry)
     trace.append(
         AgentTraceEntry(
             agent="evidence_verifier",
@@ -326,7 +400,7 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
             ),
         )
     )
-    assessment = evaluate_comparison(comparison, before_clauses, after_clauses, settings)
+    assessment = evaluate_comparison(comparison, before_clauses, after_clauses, settings, registry)
     trace.append(
         AgentTraceEntry(
             agent="critic_agent",
@@ -339,10 +413,10 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
     while (
         revisions < settings.agent_max_revisions
         and (not assessment.passed or assessment.score < settings.agent_quality_threshold)
-        and assessment.issues
+        and any(issue.category != "coverage" for issue in assessment.issues)
     ):
         candidate = revise_with_openai(
-            before_clauses, after_clauses, comparison, assessment, settings
+            before_clauses, after_clauses, comparison, assessment, settings, registry
         )
         revisions += 1
         trace.append(
@@ -354,7 +428,7 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
             )
         )
         candidate_assessment = evaluate_comparison(
-            candidate, before_clauses, after_clauses, settings
+            candidate, before_clauses, after_clauses, settings, registry
         )
         trace.append(
             AgentTraceEntry(
@@ -367,8 +441,8 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
                 ),
             )
         )
-        source_errors = len(source_issues(comparison, before_clauses, after_clauses))
-        candidate_errors = len(source_issues(candidate, before_clauses, after_clauses))
+        source_errors = len(source_issues(comparison, before_clauses, after_clauses, registry))
+        candidate_errors = len(source_issues(candidate, before_clauses, after_clauses, registry))
         if candidate_errors < source_errors or (
             candidate_errors == source_errors and candidate_assessment.score >= assessment.score
         ):
@@ -421,13 +495,25 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
         )
     )
     summary = make_summary(before_clauses, after_clauses, findings)
-    summary.before_functions = comparison.before_function_count
-    summary.after_functions = comparison.after_function_count
+    registry = reconcile_mappings(registry, comparison.function_links, comparison.added_after_ids)
+    summary.before_functions = registry.coverage.before_functions
+    summary.after_functions = registry.coverage.after_functions
+    summary.unchanged = sum(item.status == MappingStatus.UNCHANGED for item in registry.mappings)
+    if registry.coverage.unresolved_fragments:
+        warnings.append(
+            f"Не закрыто извлечение фрагментов: {registry.coverage.unresolved_fragments}. "
+            "Реестр функций неполон; проверьте список источников."
+        )
+    if registry.coverage.needs_review_mappings:
+        warnings.append(
+            f"Требуют проверки записи реестра: {registry.coverage.needs_review_mappings}."
+        )
     warnings.append(
-        "Количество функций ДО/ПОСЛЕ — оценка модели, а не полный реестр. "
-        "Без изменений — только явно сопоставленные пары; полнота покрытия не измерена. "
+        "Количество функций ДО/ПОСЛЕ считается по реестру извлечённых обязанностей. "
+        "Охват фрагментов не доказывает полноту извлечения или правильность сопоставления. "
         "Оценка контролёра не является измеренной точностью системы."
     )
+    stage("report", 90)
     return PipelineResult(
         summary=summary,
         findings=findings,
@@ -436,4 +522,5 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
         warnings=warnings,
         agent_trace=trace,
         quality_score=assessment.score,
+        function_registry=registry,
     )

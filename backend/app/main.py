@@ -1,6 +1,7 @@
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
@@ -69,43 +70,42 @@ async def run_analysis(analysis_id: str, before: list[Path], after: list[Path]) 
         return
     analysis.status = AnalysisStatus.PROCESSING
     await store.put(analysis)
+    loop = asyncio.get_running_loop()
+
+    async def update_stage(code: str, progress: int) -> None:
+        index = next(index for index, step in enumerate(analysis.steps) if step.code == code)
+        for position, step in enumerate(analysis.steps):
+            step.status = (
+                StepStatus.COMPLETED
+                if position < index
+                else StepStatus.PROCESSING
+                if position == index
+                else StepStatus.PENDING
+            )
+        analysis.current_step = analysis.steps[index].title
+        analysis.progress = progress
+        await store.put(analysis)
+
+    def on_stage(code: str, progress: int) -> None:
+        asyncio.run_coroutine_threadsafe(update_stage(code, progress), loop).result(timeout=5)
+
     try:
-        for index, step in enumerate(analysis.steps[:2]):
-            step.status = StepStatus.PROCESSING
-            analysis.current_step = step.title
-            analysis.progress = index * 20 + 5
-            await store.put(analysis)
-            await asyncio.sleep(0)
-            step.status = StepStatus.COMPLETED
-            analysis.progress = (index + 1) * 20
-
-        analysis.steps[2].status = StepStatus.PROCESSING
-        analysis.current_step = analysis.steps[2].title
-        analysis.progress = 45
-        result = await asyncio.to_thread(analyze_documents, before, after, settings)
-        analysis.steps[2].status = StepStatus.COMPLETED
-        analysis.progress = 70
-
-        analysis.steps[3].status = StepStatus.PROCESSING
-        analysis.current_step = analysis.steps[3].title
+        result = await asyncio.to_thread(analyze_documents, before, after, settings, on_stage)
         analysis.findings = result.findings
         analysis.organization_changes = result.organization_changes
         analysis.summary = result.summary
         analysis.warnings = result.warnings
         analysis.agent_trace = result.agent_trace
         analysis.quality_score = result.quality_score
-        analysis.steps[3].status = StepStatus.COMPLETED
-        analysis.progress = 90
-
-        analysis.steps[4].status = StepStatus.PROCESSING
-        analysis.current_step = analysis.steps[4].title
+        analysis.function_registry = result.function_registry
         analysis.conclusion = result.conclusion
-        analysis.steps[4].status = StepStatus.COMPLETED
+        for step in analysis.steps:
+            step.status = StepStatus.COMPLETED
         analysis.progress = 100
         analysis.status = AnalysisStatus.COMPLETED
         analysis.current_step = "Готово"
         await store.put(analysis)
-    except Exception as exc:  # pragma: no cover - defensive job boundary
+    except Exception as exc:  # noqa: BLE001 - defensive background job boundary
         analysis.status = AnalysisStatus.FAILED
         analysis.current_step = "Ошибка"
         processing_step = next(
@@ -119,9 +119,9 @@ async def run_analysis(analysis_id: str, before: list[Path], after: list[Path]) 
 
 @app.post("/api/v1/analyses", response_model=AnalysisCreated, status_code=status.HTTP_202_ACCEPTED)
 async def create_analysis(
-    before_files: list[UploadFile] = File(...),
-    after_files: list[UploadFile] = File(...),
-    title: str = Form("Анализ реорганизации"),
+    before_files: Annotated[list[UploadFile], File()],
+    after_files: Annotated[list[UploadFile], File()],
+    title: Annotated[str, Form()] = "Анализ реорганизации",
 ) -> AnalysisCreated:
     if not before_files or not after_files:
         raise HTTPException(422, "Нужен хотя бы один документ в каждом комплекте")

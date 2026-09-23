@@ -24,6 +24,8 @@
 
     <OrgMap :changes="analysis.organization_changes ?? []" />
 
+    <FunctionRegistry v-if="analysis.function_registry" :registry="analysis.function_registry" />
+
     <div class="sv-col" style="gap: 12px">
       <FindingsTable :before-count="analysis.summary?.before_functions ?? 0" />
 
@@ -42,6 +44,7 @@
 import { computed, nextTick } from 'vue'
 import AgentTrace from '@/components/AgentTrace.vue'
 import FindingsTable from '@/components/FindingsTable.vue'
+import FunctionRegistry from '@/components/FunctionRegistry.vue'
 import OrgMap from '@/components/OrgMap.vue'
 import SummaryStrip from '@/components/SummaryStrip.vue'
 import type { FindingType } from '@/api/types'

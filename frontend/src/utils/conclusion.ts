@@ -1,5 +1,5 @@
 // The contract returns `conclusion` as free text. Sections 02–05 of the conclusion
-// document are derived from findings and summary, which the backend already verified.
+// document are derived from accepted findings and coverage, not a guarantee of completeness.
 import type { Analysis, Evidence, Finding } from '@/api/types'
 import { sortFindings } from './findings'
 import { FUNCS_WORD, TYPE_META, pluralize } from './labels'
@@ -18,14 +18,22 @@ export function buildConclusion(a: Analysis, labelOf: (id: string) => string = (
   const lost = findings.filter((f) => f.type === 'lost')
 
   let completeness = 'Сводные показатели не получены.'
-  if (s) {
+  if (a.function_registry) {
+    const coverage = a.function_registry.coverage
+    const potentialLosses = a.function_registry.mappings.filter(row => row.status === 'lost').length
+    completeness = `Рассмотрено ${coverage.reviewed_fragments} из ${coverage.total_fragments} текстовых фрагментов. `
+      + `В реестре ${coverage.before_functions} записей функций ДО и ${coverage.after_functions} ПОСЛЕ; `
+      + `сопоставлено с новой редакцией ${coverage.matched_before_functions} функций ДО. `
+      + `Потенциальных потерь в реестре: ${potentialLosses}. `
+      + `Требуют проверки: ${coverage.needs_review_mappings} сопоставлений и ${coverage.unresolved_fragments} фрагментов. `
+      + 'Эти показатели не доказывают полноту извлечения и распределения функций; требуется экспертная проверка.'
+  } else if (s) {
     const base = `Из ${s.before_functions} ${pluralize(s.before_functions, FUNCS_WORD)} комплекта «до» ${s.unchanged} сохранены без изменений.`
     if (s.lost > 0) {
-      const pct = s.before_functions ? Math.round((s.lost / s.before_functions) * 100) : 0
       const names = lost.map((f) => `«${f.title}» (${labelOf(f.id)})`).join(', ')
-      completeness = `Распределение функций неполное. ${base} ${s.lost} ${pluralize(s.lost, FUNCS_WORD)} (${pct}%) не закреплены ни за одним подразделением${names ? `: ${names}` : ''}.`
+      completeness = `${base} Выявлено потенциальных потерь: ${s.lost}${names ? `: ${names}` : ''}. Полнота распределения функций не подтверждена.`
     } else {
-      completeness = `${base} Все функции комплекта «до» закреплены за подразделениями новой структуры.`
+      completeness = `${base} Потенциальные потери в принятых находках не указаны. Это не подтверждает полноту распределения функций.`
     }
   }
 

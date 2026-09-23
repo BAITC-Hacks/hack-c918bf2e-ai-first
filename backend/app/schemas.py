@@ -55,6 +55,68 @@ class Evidence(BaseModel):
     page: int | None = None
 
 
+class DocumentSide(StrEnum):
+    BEFORE = "before"
+    AFTER = "after"
+
+
+class SourceReviewStatus(StrEnum):
+    FUNCTIONS = "functions"
+    NON_FUNCTIONAL = "non_functional"
+    NEEDS_REVIEW = "needs_review"
+
+
+class MappingStatus(StrEnum):
+    UNCHANGED = "unchanged"
+    MOVED = "moved"
+    CHANGED = "changed"
+    LOST = "lost"
+    ADDED = "added"
+    NEEDS_REVIEW = "needs_review"
+
+
+class SourceReview(BaseModel):
+    source_id: str
+    side: DocumentSide
+    document: str
+    clause: str
+    status: SourceReviewStatus
+    reason: str = ""
+
+
+class ExtractedFunction(BaseModel):
+    id: str
+    source_id: str
+    side: DocumentSide
+    action: str
+    owner: str | None = None
+    evidence: Evidence
+
+
+class FunctionMapping(BaseModel):
+    before_id: str | None
+    after_ids: list[str]
+    status: MappingStatus
+    explanation: str
+
+
+class CoverageMetrics(BaseModel):
+    total_fragments: int = 0
+    reviewed_fragments: int = 0
+    unresolved_fragments: int = 0
+    before_functions: int = 0
+    after_functions: int = 0
+    matched_before_functions: int = 0
+    needs_review_mappings: int = 0
+
+
+class FunctionRegistry(BaseModel):
+    functions: list[ExtractedFunction] = Field(default_factory=list)
+    source_reviews: list[SourceReview] = Field(default_factory=list)
+    mappings: list[FunctionMapping] = Field(default_factory=list)
+    coverage: CoverageMetrics = Field(default_factory=CoverageMetrics)
+
+
 class Finding(BaseModel):
     id: str
     type: FindingType
@@ -116,6 +178,7 @@ class Analysis(BaseModel):
     warnings: list[str] = []
     agent_trace: list[AgentTraceEntry] = []
     quality_score: float | None = Field(default=None, ge=0, le=1)
+    function_registry: FunctionRegistry | None = None
     error: AnalysisError | None = None
 
 

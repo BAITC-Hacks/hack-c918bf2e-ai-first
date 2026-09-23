@@ -31,6 +31,14 @@ def display_name(path: Path) -> str:
     return name[33:] if re.match(r"^[0-9a-f]{32}_", name) else name
 
 
+def match_source_quote(quote: str, text: str) -> str | None:
+    if not quote.strip():
+        return None
+    pattern = r"\s+".join(re.escape(word) for word in quote.split())
+    match = re.search(pattern, text, re.IGNORECASE)
+    return text[match.start() : match.end()] if match else None
+
+
 def split_inline_clauses(text: str) -> list[str]:
     """Split only consecutive siblings, not arbitrary numbers or cross-references."""
     first = CLAUSE_RE.match(text)

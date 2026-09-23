@@ -47,7 +47,7 @@
         <div class="sv-col sec-body">
           <h3 class="sec-title">Потенциальные конфликты интересов</h3>
           <template v-if="model.conflicts.length">
-            <span class="sv-meta">По выводам «Дублирование»: одна функция закреплена за несколькими подразделениями.</span>
+            <span class="sv-meta">Выводы «Дублирование» требуют отдельной проверки: пересечение функций само по себе не доказывает конфликт интересов.</span>
             <ol class="list">
               <li v-for="f in model.conflicts" :key="f.id">
                 {{ f.explanation }}
@@ -55,7 +55,7 @@
               </li>
             </ol>
           </template>
-          <p v-else class="para">Не выявлено.</p>
+          <p v-else class="para">В принятых находках пересечения не указаны. Отсутствие конфликта интересов не подтверждено.</p>
         </div>
       </section>
 
