@@ -1,0 +1,82 @@
+:root {
+  --c-bg: #f3f5f8;
+  --c-surface: #ffffff;
+  --c-border: #dde3ea;
+  --c-text: #17212b;
+  --c-muted: #5b6b7c;
+  --c-navy: #0f2a44;
+}
+
+body {
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: 'Roboto', -apple-system, 'Segoe UI', sans-serif;
+}
+
+.app-bg { background: var(--c-bg); }
+.app-container { max-width: 1440px; margin: 0 auto; width: 100%; }
+.page-pad { padding: 24px 16px 48px; }
+@media (min-width: 1024px) { .page-pad { padding: 28px 32px 56px; } }
+
+.app-header { background: var(--c-navy); }
+.brand { color: #fff; text-decoration: none; gap: 12px; }
+.brand-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 6px;
+  background: #1c4a76; color: #9fd0ff; font-weight: 700; font-size: 14px; letter-spacing: .5px;
+}
+.brand-title { font-weight: 600; font-size: 16px; line-height: 1.1; }
+.brand-sub { font-size: 12px; opacity: .72; line-height: 1.2; }
+
+.panel {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+}
+.panel-head {
+  padding: 14px 18px; border-bottom: 1px solid var(--c-border);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.panel-title { font-size: 15px; font-weight: 600; line-height: 1.35; letter-spacing: normal; margin: 0; }
+.panel-body { padding: 18px; }
+
+.page-title { font-size: 24px; font-weight: 600; line-height: 1.25; letter-spacing: normal; margin: 0; }
+.eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--c-muted); font-weight: 500; }
+.muted { color: var(--c-muted); }
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Semantic colours for finding types and severities (usable as Quasar color props). */
+$semantic: (
+  'loss': #c62828,
+  'dup': #7b3fb0,
+  'change': #b86e00,
+  'move': #1f63b5,
+  'add': #1e8e5a,
+  'same': #6b7785,
+  'sev-high': #c62828,
+  'sev-medium': #c77700,
+  'sev-low': #2b7bd6,
+  'sev-info': #8793a0,
+);
+@each $name, $color in $semantic {
+  .text-#{$name} { color: $color !important; }
+  .bg-#{$name} { background: $color !important; }
+  .bg-#{$name}-soft { background: rgba($color, .1) !important; }
+  .border-#{$name} { border-color: $color !important; }
+}
+
+.sev-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+
+.quote {
+  margin: 0; padding: 10px 14px; border-left: 3px solid var(--c-border);
+  background: #f7f9fb; border-radius: 0 4px 4px 0; font-size: 14px; line-height: 1.5;
+}
+
+.conclusion-text { white-space: pre-line; line-height: 1.65; font-size: 15px; }
+
+@media print {
+  .no-print { display: none !important; }
+  .q-page-container { padding-top: 0 !important; }
+  body, .app-bg { background: #fff; }
+  .panel { break-inside: avoid; }
+}

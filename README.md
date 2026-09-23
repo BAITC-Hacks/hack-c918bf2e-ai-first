@@ -92,6 +92,10 @@ docker compose up --build
 - Swagger UI: <http://localhost:8010/docs>
 - проверка backend: <http://localhost:8010/health>
 
+Compose запускает три сервиса: production-сборку frontend на nginx, FastAPI backend
+и PostgreSQL с расширением pgvector. Запуск в фоне: `docker compose up --build -d`.
+Статус сервисов: `docker compose ps`, общие логи: `docker compose logs -f`.
+
 Остановка: `docker compose down`. Удаление локальных данных БД: `docker compose down -v`.
 
 ## Локальная разработка

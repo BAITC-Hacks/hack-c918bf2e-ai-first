@@ -1,0 +1,71 @@
+name: ${COMPOSE_PROJECT_NAME:-ai-first}
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ai_first}
+      POSTGRES_USER: ${POSTGRES_USER:-ai_first}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - .back_env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ai_first}:${POSTGRES_PASSWORD:-change-me}@db:5432/${POSTGRES_DB:-ai_first}
+    ports:
+      - "${BACKEND_PORT:-8010}:8010"
+    volumes:
+      - uploads_data:/tmp/ai-first/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      API_BASE: ${API_BASE:-http://localhost:8010}
+    ports:
+      - "${FRONTEND_PORT:-3001}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -qO-
+        - http://127.0.0.1/healthz
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  uploads_data:
