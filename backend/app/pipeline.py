@@ -1,6 +1,6 @@
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
 
@@ -26,7 +26,9 @@ from app.schemas import (
     MappingStatus,
     OrganizationChange,
     OrganizationChangeStatus,
+    RiskEvidence,
     Severity,
+    StructuralRisk,
 )
 
 
@@ -40,6 +42,7 @@ class PipelineResult:
     agent_trace: list[AgentTraceEntry]
     quality_score: float
     function_registry: FunctionRegistry
+    structural_risks: list[StructuralRisk] = field(default_factory=list)
 
 
 def normalize(value: str) -> str:
@@ -84,6 +87,9 @@ def verify_evidence(
 def required_evidence_present(
     kind: FindingType, before: Evidence | None, after: Evidence | None
 ) -> bool:
+    if kind == FindingType.DUPLICATE:
+        # A before/after pair cannot establish same-version duplication.
+        return False
     if kind == FindingType.LOST:
         return before is not None
     if kind == FindingType.ADDED:
@@ -125,6 +131,42 @@ def build_findings(
     if rejected:
         warnings.append(f"Контроль качества исключил выводы без проверяемых цитат: {rejected}.")
     return findings, warnings
+
+
+def build_structural_risks(
+    comparison: ComparisonDraft, before_clauses: list[Clause], after_clauses: list[Clause]
+) -> tuple[list[StructuralRisk], list[str]]:
+    indexes = {"before": evidence_index(before_clauses), "after": evidence_index(after_clauses)}
+    risks: list[StructuralRisk] = []
+    rejected = 0
+    seen = set()
+    for draft in comparison.structural_risks:
+        verified = []
+        for item in draft.evidence:
+            evidence = verify_evidence(item.evidence, indexes[item.side])
+            if evidence is not None:
+                verified.append(RiskEvidence(side=item.side, evidence=evidence))
+        locators = {(item.side, item.evidence.document, item.evidence.clause) for item in verified}
+        if (len(verified) != len(draft.evidence) or len(locators) < 2
+                or len({item.side for item in verified}) != 1):
+            rejected += 1
+            continue
+        key = (draft.kind, frozenset(locators))
+        if key in seen:
+            continue
+        seen.add(key)
+        risks.append(StructuralRisk(
+            id=str(uuid4()), kind=draft.kind, severity=draft.severity, title=draft.title,
+            explanation=draft.explanation, confidence=draft.confidence, evidence=verified,
+            recommendation=draft.recommendation,
+        ))
+    warnings = []
+    if rejected:
+        warnings.append(
+            f"Контроль качества исключил структурные риски: {rejected}. "
+            "Нужны как минимум два разных подтверждённых фрагмента одной редакции."
+        )
+    return risks, warnings
 
 
 def make_summary(
@@ -219,6 +261,23 @@ def source_issues(
                             ),
                         )
                     )
+    for position, risk in enumerate(comparison.structural_risks):
+        for number, item in enumerate(risk.evidence):
+            if verify_evidence(item.evidence, indexes[item.side]) is None:
+                issues.append(QualityIssue(
+                    category="invalid_source",
+                    message=f"structural_risks[{position}].evidence[{number}]: цитата не подтверждена",
+                    revision_instruction="Укажи точный фрагмент и дословную цитату указанной редакции. "
+                    "Если подтверждения нет, удали структурный риск.",
+                ))
+    risks, _ = build_structural_risks(comparison, before, after)
+    if len(risks) < len(comparison.structural_risks):
+        issues.append(QualityIssue(
+            category="missing_evidence",
+            message="Структурные риски содержат повторные/невалидные или межредакционные основания",
+            revision_instruction="Для каждого structural_risks нужны два разных фрагмента одной "
+            "редакции. Не повторяй риски с одинаковыми основаниями. Если оснований нет, удали риск.",
+        ))
     findings, _ = build_findings(comparison, before, after)
     _, rejected_orgs = build_organization_changes(comparison, before, after)
     if len(findings) < len(comparison.findings) or rejected_orgs:
@@ -264,7 +323,16 @@ def evaluate_comparison(
     registry: FunctionRegistry | None = None,
 ) -> QualityAssessment:
     issues = source_issues(comparison, before, after, registry)
-    assessment = assess_quality_with_openai(comparison, settings, before, after, issues, registry)
+    # Review the report we actually publish, not unused free-form LLM prose.
+    verified_findings, warnings = build_findings(comparison, before, after)
+    verified_orgs, _ = build_organization_changes(comparison, before, after)
+    verified_risks, risk_warnings = build_structural_risks(comparison, before, after)
+    review_input = comparison.model_copy(update={
+        "conclusion": build_conclusion(
+            verified_findings, verified_orgs, warnings + risk_warnings, verified_risks
+        )
+    })
+    assessment = assess_quality_with_openai(review_input, settings, before, after, issues, registry)
     if issues:
         assessment.passed = False
         assessment.score = min(assessment.score, 0.49)
@@ -273,7 +341,8 @@ def evaluate_comparison(
 
 
 def build_conclusion(
-    findings: list[Finding], organizations: list[OrganizationChange], warnings: list[str]
+    findings: list[Finding], organizations: list[OrganizationChange], warnings: list[str],
+    structural_risks: list[StructuralRisk] | None = None,
 ) -> str:
     """No new model claims after filtering: report only accepted, source-linked items."""
     deviations = [item for item in findings if item.type != FindingType.UNCHANGED]
@@ -293,6 +362,15 @@ def build_conclusion(
         lines.append(
             f"- {item.title}: {item.explanation} [{sources}] Рекомендация: {item.recommendation}"
         )
+    for risk in structural_risks or []:
+        kind = "дублирование" if risk.kind == "duplicate" else "конфликт интересов"
+        sources = "; ".join(
+            f"{'ДО' if item.side == 'before' else 'ПОСЛЕ'}: "
+            f"{item.evidence.document}, {item.evidence.clause}"
+            for item in risk.evidence
+        )
+        lines.append(f"- Потенциальный риск ({kind}): {risk.title}. {risk.explanation} "
+                     f"[{sources}] Рекомендация: {risk.recommendation}")
     for item in organizations:
         sources = "; ".join(
             f"{evidence.document}, {evidence.clause}"
@@ -300,7 +378,7 @@ def build_conclusion(
             if evidence is not None
         )
         lines.append(f"- Структура ({item.status.value}): {item.explanation} [{sources}]")
-    if not deviations:
+    if not deviations and not structural_risks:
         lines.append(
             "Отсутствие принятых отклонений не доказывает отсутствие рисков или потерь функций."
         )
@@ -314,14 +392,27 @@ def analyze_documents(
     after: list[Path],
     settings: Settings,
     on_stage: Callable[[str, int], None] | None = None,
+    on_checkpoint: Callable[[list[AgentTraceEntry], FunctionRegistry | None], None] | None = None,
 ) -> PipelineResult:
+    registry: FunctionRegistry | None = None
+    trace: list[AgentTraceEntry] = []
+
+    def record(entry: AgentTraceEntry) -> None:
+        trace.append(entry)
+        if on_checkpoint:
+            # Pass detached, validated snapshots; never expose model drafts or reasoning.
+            on_checkpoint(
+                [item.model_copy(deep=True) for item in trace],
+                registry.model_copy(deep=True) if registry is not None else None,
+            )
+
     def stage(code: str, progress: int) -> None:
         if on_stage:
             on_stage(code, progress)
 
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY не настроен")
-    trace = [
+    record(
         AgentTraceEntry(
             agent="orchestrator",
             action="plan",
@@ -331,13 +422,13 @@ def analyze_documents(
                 f"после — {len(after)}."
             ),
         )
-    ]
+    )
     stage("extract", 5)
     before_clauses = parse_documents(before)
     after_clauses = parse_documents(after)
     if not before_clauses or not after_clauses:
         raise RuntimeError("Не удалось извлечь текстовые фрагменты в одном из комплектов")
-    trace.append(
+    record(
         AgentTraceEntry(
             agent="document_tools",
             action="extract",
@@ -347,7 +438,7 @@ def analyze_documents(
     )
     stage("structure", 20)
     registry = extract_registry(before_clauses, after_clauses, settings)
-    trace.append(
+    record(
         AgentTraceEntry(
             agent="function_extractor",
             action="inventory",
@@ -361,7 +452,8 @@ def analyze_documents(
     )
     stage("compare", 45)
     function_links, added_ids = match_registry(registry, settings)
-    trace.append(
+    registry = reconcile_mappings(registry, function_links, added_ids)
+    record(
         AgentTraceEntry(
             agent="function_matcher",
             action="match_inventory",
@@ -375,7 +467,7 @@ def analyze_documents(
     comparison.added_after_ids = added_ids
     comparison.before_function_count = registry.coverage.before_functions
     comparison.after_function_count = registry.coverage.after_functions
-    trace.append(
+    record(
         AgentTraceEntry(
             agent="comparison_agent",
             action="compare",
@@ -389,7 +481,7 @@ def analyze_documents(
 
     stage("verify", 70)
     initial_source_issues = source_issues(comparison, before_clauses, after_clauses, registry)
-    trace.append(
+    record(
         AgentTraceEntry(
             agent="evidence_verifier",
             action="precheck",
@@ -401,7 +493,7 @@ def analyze_documents(
         )
     )
     assessment = evaluate_comparison(comparison, before_clauses, after_clauses, settings, registry)
-    trace.append(
+    record(
         AgentTraceEntry(
             agent="critic_agent",
             action="evaluate",
@@ -419,7 +511,7 @@ def analyze_documents(
             before_clauses, after_clauses, comparison, assessment, settings, registry
         )
         revisions += 1
-        trace.append(
+        record(
             AgentTraceEntry(
                 agent="comparison_agent",
                 action="revise",
@@ -430,7 +522,7 @@ def analyze_documents(
         candidate_assessment = evaluate_comparison(
             candidate, before_clauses, after_clauses, settings, registry
         )
-        trace.append(
+        record(
             AgentTraceEntry(
                 agent="critic_agent",
                 action="re-evaluate",
@@ -448,7 +540,7 @@ def analyze_documents(
         ):
             comparison = candidate
             assessment = candidate_assessment
-            trace.append(
+            record(
                 AgentTraceEntry(
                     agent="orchestrator",
                     action="accept_revision",
@@ -457,7 +549,7 @@ def analyze_documents(
                 )
             )
         else:
-            trace.append(
+            record(
                 AgentTraceEntry(
                     agent="orchestrator",
                     action="rollback",
@@ -470,6 +562,8 @@ def analyze_documents(
             )
             break
     findings, warnings = build_findings(comparison, before_clauses, after_clauses)
+    structural_risks, risk_warnings = build_structural_risks(comparison, before_clauses, after_clauses)
+    warnings.extend(risk_warnings)
     if not assessment.passed or assessment.score < settings.agent_quality_threshold:
         warnings.append(
             f"Оценка контролёра {assessment.score:.0%}: результат требует проверки специалистом."
@@ -483,14 +577,15 @@ def analyze_documents(
             "Контроль качества исключил изменения структуры без проверяемых цитат: "
             f"{rejected_organizations}."
         )
-    trace.append(
+    record(
         AgentTraceEntry(
             agent="evidence_verifier",
             action="verify",
             status="completed",
             summary=(
                 f"Проверены источники: принято {len(findings)} выводов и "
-                f"{len(organization_changes)} изменений структуры."
+                f"{len(organization_changes)} изменений структуры; "
+                f"потенциальных структурных рисков — {len(structural_risks)}."
             ),
         )
     )
@@ -518,9 +613,10 @@ def analyze_documents(
         summary=summary,
         findings=findings,
         organization_changes=organization_changes,
-        conclusion=build_conclusion(findings, organization_changes, warnings),
+        conclusion=build_conclusion(findings, organization_changes, warnings, structural_risks),
         warnings=warnings,
         agent_trace=trace,
         quality_score=assessment.score,
         function_registry=registry,
+        structural_risks=structural_risks,
     )

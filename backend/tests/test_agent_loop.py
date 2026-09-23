@@ -76,6 +76,26 @@ def test_judge_cannot_overrule_invalid_quote(monkeypatch) -> None:
     assert calls[0][2]
 
 
+def test_critic_checks_actual_report_not_unused_generated_prose(monkeypatch):
+    calls = []
+
+    def critic(comparison, *args):
+        calls.append(comparison.conclusion)
+        return assessment()
+
+    monkeypatch.setattr(pipeline, "assess_quality_with_openai", critic)
+    original = draft()
+    pipeline.evaluate_comparison(
+        original,
+        [Clause("before.docx", "1.1", "Контролирует риски")],
+        [Clause("after.docx", "1.1", "Формирует отчётность")],
+        Settings(),
+    )
+    assert "НЕПРОВЕРЕННОЕ" not in calls[0]
+    assert "before.docx, 1.1" in calls[0]
+    assert original.conclusion == "НЕПРОВЕРЕННОЕ УТВЕРЖДЕНИЕ"
+
+
 def test_full_pipeline_repairs_invalid_quote_and_reports_only_accepted_claims(
     tmp_path, monkeypatch, stub_registry_model
 ):
@@ -109,6 +129,51 @@ def test_exhausted_repair_drops_claim_from_report(tmp_path, monkeypatch, stub_re
     assert "Потеря контроля" not in result.conclusion
     assert "НЕПРОВЕРЕННОЕ" not in result.conclusion
     assert result.warnings
+
+
+def test_checkpoints_publish_registry_and_trace_before_final_report(
+    tmp_path, monkeypatch, stub_registry_model
+):
+    before, after = documents(tmp_path)
+    checkpoints = []
+
+    def analyst(*args):
+        trace, registry = checkpoints[-1]
+        assert trace[-1].action == "match_inventory"
+        assert registry.coverage.reviewed_fragments == 2
+        assert len(registry.mappings) == 2
+        return draft()
+
+    monkeypatch.setattr(pipeline, "analyze_with_openai", analyst)
+    monkeypatch.setattr(pipeline, "assess_quality_with_openai", lambda *args: assessment())
+    result = pipeline.analyze_documents(
+        before, after, Settings(openai_api_key="test"),
+        on_checkpoint=lambda trace, registry: checkpoints.append((trace, registry)),
+    )
+    assert len(checkpoints[0][0]) == 1
+    assert checkpoints[0][1] is None
+    assert checkpoints[-1][0] == result.agent_trace
+    assert checkpoints[-1][1] == result.function_registry
+    checkpoints[-1][0].clear()
+    checkpoints[-1][1].functions.clear()
+    assert result.agent_trace and result.function_registry.functions
+
+
+def test_failed_analyst_keeps_extraction_checkpoint(tmp_path, monkeypatch, stub_registry_model):
+    before, after = documents(tmp_path)
+    checkpoints = []
+
+    def failing_analyst(*args):
+        raise RuntimeError("Provider unavailable")
+
+    monkeypatch.setattr(pipeline, "analyze_with_openai", failing_analyst)
+    with pytest.raises(RuntimeError, match="Provider unavailable"):
+        pipeline.analyze_documents(
+            before, after, Settings(openai_api_key="test"),
+            on_checkpoint=lambda trace, registry: checkpoints.append((trace, registry)),
+        )
+    assert checkpoints[-1][0][-1].action == "match_inventory"
+    assert checkpoints[-1][1].coverage.reviewed_fragments == 2
 
 
 @pytest.mark.parametrize("revisions", [-1, 3])

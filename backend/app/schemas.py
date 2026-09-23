@@ -60,6 +60,27 @@ class DocumentSide(StrEnum):
     AFTER = "after"
 
 
+class StructuralRiskKind(StrEnum):
+    DUPLICATE = "duplicate"
+    CONFLICT_INTEREST = "conflict_interest"
+
+
+class RiskEvidence(BaseModel):
+    side: DocumentSide
+    evidence: Evidence
+
+
+class StructuralRisk(BaseModel):
+    id: str
+    kind: StructuralRiskKind
+    severity: Severity
+    title: str
+    explanation: str
+    confidence: float = Field(ge=0, le=1)
+    evidence: list[RiskEvidence] = Field(min_length=2, max_length=6)
+    recommendation: str
+
+
 class SourceReviewStatus(StrEnum):
     FUNCTIONS = "functions"
     NON_FUNCTIONAL = "non_functional"
@@ -173,6 +194,7 @@ class Analysis(BaseModel):
     steps: list[AnalysisStep]
     summary: AnalysisSummary | None = None
     findings: list[Finding] = []
+    structural_risks: list[StructuralRisk] | None = None
     organization_changes: list[OrganizationChange] = []
     conclusion: str | None = None
     warnings: list[str] = []

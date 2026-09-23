@@ -1,4 +1,5 @@
 import asyncio
+import threading
 import time
 from datetime import UTC, datetime
 from io import BytesIO
@@ -12,7 +13,7 @@ from app.analyzer import ComparisonDraft, EvidenceDraft, FindingDraft, QualityAs
 from app.config import Settings
 from app.main import app
 from app.registry import FunctionLinkDraft
-from app.schemas import Analysis, AnalysisStep
+from app.schemas import AgentTraceEntry, Analysis, AnalysisStep, FunctionRegistry
 from app.store import MemoryAnalysisStore
 
 client = TestClient(app)
@@ -76,6 +77,47 @@ async def test_cancelled_job_preserves_interrupted_state(monkeypatch):
     assert recovered.progress == 20
     assert recovered.error.code == "ANALYSIS_INTERRUPTED"
     assert recovered.steps[0].status == "failed"
+
+
+def test_api_exposes_live_checkpoint_and_keeps_it_on_provider_failure(monkeypatch, tmp_path):
+    ready, finish = threading.Event(), threading.Event()
+
+    def worker(before, after, settings, on_stage, on_checkpoint):
+        on_stage("structure", 20)
+        on_checkpoint([
+            AgentTraceEntry(agent="document_tools", action="extract", status="completed",
+                            summary="Тестовый завершённый шаг")
+        ], FunctionRegistry())
+        ready.set()
+        finish.wait(timeout=3)
+        raise RuntimeError("private-provider-error-must-not-leak")
+
+    monkeypatch.setattr(main, "analyze_documents", worker)
+    monkeypatch.setattr(main, "settings", Settings(upload_dir=str(tmp_path)))
+    with TestClient(app) as session:
+        created = session.post("/api/v1/analyses", files=[
+            ("before_files", ("before.docx", b"stubbed-parser")),
+            ("after_files", ("after.docx", b"stubbed-parser")),
+        ])
+        assert created.status_code == 202
+        try:
+            assert ready.wait(timeout=2)
+            url = f"/api/v1/analyses/{created.json()['id']}"
+            running = session.get(url).json()
+            assert running["status"] == "processing"
+            assert running["agent_trace"][0]["action"] == "extract"
+            assert running["function_registry"] is not None
+        finally:
+            finish.set()
+        for _ in range(100):
+            result = session.get(url).json()
+            if result["status"] == "failed":
+                break
+            time.sleep(0.01)
+        assert result["status"] == "failed"
+        assert result["agent_trace"] == running["agent_trace"]
+        assert result["function_registry"] == running["function_registry"]
+        assert "private-provider-error" not in result["error"]["message"]
 
 
 def test_analysis_requires_supported_documents() -> None:
@@ -162,6 +204,7 @@ def test_upload_to_completed_report_with_stubbed_provider(
                 break
             time.sleep(0.01)
         assert result["status"] == "completed", result
+        assert result["structural_risks"] == []
         assert result["summary"]["changed"] == 1
         assert result["findings"][0]["before"]["quote"] == "ежемесячный отчёт"
         assert "before.docx, 2.1" in result["conclusion"]

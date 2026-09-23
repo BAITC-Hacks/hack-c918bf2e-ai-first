@@ -18,8 +18,10 @@ from app.schemas import (
     Finding,
     FunctionMapping,
     FunctionRegistry,
+    RiskEvidence,
     SourceReview,
     StepStatus,
+    StructuralRisk,
 )
 from app.store import MemoryAnalysisStore, PostgresAnalysisStore
 
@@ -36,6 +38,14 @@ def snapshot(status: str = "completed") -> Analysis:
                           explanation="Пара не найдена", confidence=0.8, before=evidence,
                           recommendation="Проверить закрепление функции")],
         conclusion="Сохранённое заключение", warnings=["Требуется проверка специалиста"],
+        structural_risks=[StructuralRisk(
+            id="R1", kind="conflict_interest", severity="medium", title="Проверить роли",
+            explanation="Тестовая пара ролей", confidence=0.7, recommendation="Разделить роли",
+            evidence=[RiskEvidence(side="after", evidence=evidence),
+                      RiskEvidence(side="after", evidence=Evidence(
+                          document="регламент.docx", clause="1.3", quote="Проверяет свой отчёт."
+                      ))],
+        )],
         quality_score=0.8,
         function_registry=FunctionRegistry(
             functions=[ExtractedFunction(id="B1", source_id="B1", side="before",

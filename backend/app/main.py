@@ -15,11 +15,13 @@ from fastapi.responses import JSONResponse
 from app.config import get_settings
 from app.pipeline import analyze_documents
 from app.schemas import (
+    AgentTraceEntry,
     Analysis,
     AnalysisCreated,
     AnalysisError,
     AnalysisStatus,
     AnalysisStep,
+    FunctionRegistry,
     StepStatus,
 )
 from app.store import PostgresAnalysisStore, mark_interrupted
@@ -132,9 +134,24 @@ async def run_analysis(analysis_id: str, before: list[Path], after: list[Path]) 
             raise RuntimeError("Analysis interrupted")
         asyncio.run_coroutine_threadsafe(update_stage(code, progress), loop).result(timeout=15)
 
+    async def update_checkpoint(
+        trace: list[AgentTraceEntry], registry: FunctionRegistry | None
+    ) -> None:
+        analysis.agent_trace = trace
+        analysis.function_registry = registry
+        await store.put(analysis)
+
+    def on_checkpoint(trace: list[AgentTraceEntry], registry: FunctionRegistry | None) -> None:
+        if stopped.is_set():
+            raise RuntimeError("Analysis interrupted")
+        asyncio.run_coroutine_threadsafe(update_checkpoint(trace, registry), loop).result(timeout=15)
+
     try:
-        result = await asyncio.to_thread(analyze_documents, before, after, settings, on_stage)
+        result = await asyncio.to_thread(
+            analyze_documents, before, after, settings, on_stage, on_checkpoint
+        )
         analysis.findings = result.findings
+        analysis.structural_risks = result.structural_risks
         analysis.organization_changes = result.organization_changes
         analysis.summary = result.summary
         analysis.warnings = result.warnings
