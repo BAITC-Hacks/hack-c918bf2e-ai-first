@@ -68,7 +68,7 @@ export function buildConclusion(a: Analysis, labelOf: (id: string) => string = (
   const coverage = coverageState(a)
   const limitations = [coverage.headline, COVERAGE_DISCLAIMER]
   if (risks.kind !== 'present') limitations.push(risks.headline)
-  if (a.status === 'completed') limitations.unshift('Статус «завершено» означает, что обработка закончилась, а не что все функции проверены.')
+  if (a.status === 'completed') limitations.unshift('Статус «Обработка завершена» означает, что pipeline закончил работу, а не что все функции проверены.')
 
   return {
     demo: isDemoId(a.id),

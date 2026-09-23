@@ -8,6 +8,8 @@ export const AGENT_LABEL: Record<string, string> = {
   comparison_agent: 'Агент сопоставления',
   critic_agent: 'Критик',
   evidence_verifier: 'Верификатор',
+  function_extractor: 'Извлечение функций',
+  function_matcher: 'Сопоставление функций',
 }
 
 type Tone = 'neutral' | 'accent' | 'positive' | 'warning'
@@ -15,6 +17,9 @@ type Tone = 'neutral' | 'accent' | 'positive' | 'warning'
 export const ACTION_META: Record<string, { label: string; icon: string; tone: Tone }> = {
   plan: { label: 'План анализа', icon: 'route', tone: 'accent' },
   extract: { label: 'Извлечение документов', icon: 'description', tone: 'neutral' },
+  inventory: { label: 'Реестр функций', icon: 'format_list_bulleted', tone: 'neutral' },
+  match_inventory: { label: 'Пакетное сопоставление функций', icon: 'compare_arrows', tone: 'neutral' },
+  precheck: { label: 'Предварительная проверка источников', icon: 'rule', tone: 'accent' },
   compare: { label: 'Первичный анализ', icon: 'compare_arrows', tone: 'neutral' },
   evaluate: { label: 'Оценка критика', icon: 'fact_check', tone: 'accent' },
   revise: { label: 'Исправление по замечаниям', icon: 'edit_note', tone: 'warning' },
@@ -35,8 +40,13 @@ export const STATUS_META: Record<string, { label: string; icon: string }> = {
 
 const MAX_SUMMARY = 600
 
+/** Unknown codes are never shown as the label; the raw code stays in `code` for a tooltip. */
+export const UNKNOWN_ACTION_LABEL = 'Служебный этап'
+export const UNKNOWN_AGENT_LABEL = 'Сервис анализа'
+
 export interface TraceView {
   key: string
+  code: string
   agent: string
   label: string
   icon: string
@@ -54,12 +64,13 @@ export function toTraceView(entries: AgentTraceEntry[]): TraceView[] {
     const summary = (e.summary ?? '').trim()
     return {
       key: `${i}-${e.agent}-${e.action}`,
-      agent: AGENT_LABEL[e.agent] ?? e.agent,
-      label: action?.label ?? e.action,
+      code: `${e.agent} / ${e.action}`,
+      agent: AGENT_LABEL[e.agent] ?? UNKNOWN_AGENT_LABEL,
+      label: action?.label ?? UNKNOWN_ACTION_LABEL,
       icon: action?.icon ?? 'radio_button_checked',
       tone: action?.tone ?? 'neutral',
       status: e.status,
-      statusLabel: status?.label ?? e.status,
+      statusLabel: status?.label ?? 'Статус не распознан',
       statusIcon: status?.icon ?? 'info',
       summary: summary.length > MAX_SUMMARY ? `${summary.slice(0, MAX_SUMMARY - 1)}…` : summary,
     }

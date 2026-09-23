@@ -10,9 +10,9 @@
       </blockquote>
       <dl class="meta">
         <dt>Документ</dt>
-        <dd class="row items-center no-wrap" style="gap: 4px; min-width: 0">
-          <q-icon :name="docIcon(evidence.document)" size="15px" class="sv-muted" />
-          <span class="ellipsis" :title="evidence.document">{{ evidence.document }}</span>
+        <dd class="row items-start no-wrap" style="gap: 4px; min-width: 0">
+          <q-icon :name="docIcon(evidence.document)" size="15px" class="sv-muted" style="margin-top: 1px" />
+          <span class="doc-name">{{ evidence.document }}</span>
         </dd>
         <dt>Пункт / фрагмент</dt>
         <dd class="strong">{{ evidence.clause || 'не указан' }}</dd>
@@ -87,6 +87,9 @@ async function copy() {
   dd { margin: 0; color: var(--sv-text); }
   .strong { font-weight: 600; }
 }
+// Full document names: «редакция_8» vs «редакция_9» must stay visible, so wrap instead of «…».
+.doc-name { min-width: 0; overflow-wrap: anywhere; }
+.quote { overflow-wrap: anywhere; }
 .copy.q-btn { font-size: 12px; padding-left: 0; margin-left: -2px; }
 .missing { flex: 1; min-height: 180px; padding: 20px; gap: 8px; }
 .missing-title { font-size: 14px; font-weight: 500; }

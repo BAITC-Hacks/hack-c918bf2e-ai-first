@@ -29,6 +29,9 @@ dist/
 coverage/
 *.tsbuildinfo
 
+# Local design handoff export (keep the original files locally)
+/frontend/Дизайн-пакет Сверка AI First/
+
 # IDE, OS, runtime
 .idea/
 .vscode/

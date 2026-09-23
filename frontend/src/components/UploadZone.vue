@@ -35,7 +35,7 @@
       <li v-for="f in files" :key="f.id" class="file" :class="{ 'file--err': f.status === 'error' }">
         <q-icon :name="f.status === 'error' ? 'block' : docIcon(f.name)" size="20px" :style="{ color: f.status === 'error' ? 'var(--sv-high)' : 'var(--sv-muted)' }" />
         <div class="sv-col file-main">
-          <span class="file-name ellipsis" :title="f.name">{{ f.name }}</span>
+          <span class="file-name">{{ f.name }}</span>
           <span v-if="f.status === 'uploading'" class="file-progress"><span :style="{ width: `${f.progress * 100}%` }" /></span>
           <span v-if="f.status === 'error'" class="file-error row no-wrap items-start">
             <q-icon name="error_outline" size="14px" class="q-mr-xs" style="margin-top: 2px" />{{ f.error }}
@@ -127,7 +127,7 @@ function onDrop(event: DragEvent) {
 }
 .file--err { background: var(--sv-high-row); }
 .file-main { gap: 2px; min-width: 0; }
-.file-name { font-size: 13px; }
+.file-name { font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
 .file-progress { height: 3px; background: var(--sv-divider); border-radius: 2px; overflow: hidden; display: block;
   span { display: block; height: 100%; background: var(--sv-accent); transition: width .3s ease-out; } }
 .file-error { font-size: 12px; color: var(--sv-high); line-height: 1.4; }

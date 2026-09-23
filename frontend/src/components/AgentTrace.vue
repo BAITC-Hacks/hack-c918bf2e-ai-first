@@ -20,7 +20,7 @@
         </span>
         <div class="sv-col body">
           <div class="row items-baseline item-head">
-            <span class="item-label">{{ t.label }}</span>
+            <span class="item-label" :title="`Код этапа: ${t.code}`">{{ t.label }}</span>
             <span class="sv-meta">{{ t.agent }}</span>
             <q-space />
             <span class="status row items-center no-wrap" :class="`status--${t.status}`">

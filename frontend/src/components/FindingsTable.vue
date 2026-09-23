@@ -87,7 +87,7 @@
                 <span class="row items-center no-wrap" style="gap: 4px">
                   <q-icon name="format_quote" size="15px" class="sv-muted" />{{ clauseLabel(primaryEvidence(row)) }}
                 </span>
-                <span class="doc ellipsis">{{ primaryEvidence(row)?.document ?? '—' }}</span>
+                <span class="doc">{{ primaryEvidence(row)?.document ?? '—' }}</span>
                 <q-tooltip v-if="primaryEvidence(row)" :delay="400">{{ primaryEvidence(row)!.document }}</q-tooltip>
               </div>
               <ConfidenceMeter v-else-if="col.name === 'confidence'" :value="row.confidence" />
@@ -228,7 +228,7 @@ const visibleColumns = computed(() =>
 .id { font-size: 11px; color: var(--sv-muted); }
 .dept { font-size: 13px; line-height: 1.35; color: var(--sv-text-2); }
 .source { gap: 2px; min-width: 0; max-width: 220px; font-size: 13px; }
-.doc { font-size: 11px; color: var(--sv-muted); max-width: 200px; }
+.doc { font-size: 11px; line-height: 1.35; color: var(--sv-muted); max-width: 200px; overflow-wrap: anywhere; }
 .cell-title { min-width: 240px; }
 .empty { padding: 40px 16px; gap: 8px; }
 .empty-title { font-size: 16px; font-weight: 500; }

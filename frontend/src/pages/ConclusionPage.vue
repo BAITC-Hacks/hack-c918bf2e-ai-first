@@ -220,6 +220,7 @@ function print() {
 .risk-kind--duplicate { color: var(--sv-duplicate); }
 .risk-kind--conflict_interest { color: var(--sv-medium); }
 .risk-name { font-weight: 500; }
+.para, .list, .risk-row, .risk-sources, .limits { overflow-wrap: anywhere; }
 .risk-sources { margin: 6px 0; padding-left: 18px; font-size: 13px; line-height: 1.5; color: var(--sv-text-2); .src { color: var(--sv-text); font-weight: 500; } }
 .risk-reco { font-size: 14px; }
 .demo-mark {

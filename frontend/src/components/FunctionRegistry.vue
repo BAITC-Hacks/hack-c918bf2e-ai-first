@@ -109,7 +109,7 @@
           v-model="sourceStatus" outlined dense emit-value map-options :options="SOURCE_OPTIONS"
           class="sv-input source-select" aria-label="Решение по фрагменту"
         />
-        <span class="sv-meta">{{ sourceRows.length }} из {{ registry.source_reviews.length }}<template v-if="query.trim()"> · учтён поиск «{{ query.trim() }}»</template></span>
+        <span class="sv-meta">{{ sourceRows.length }} из {{ registry.source_reviews.length }}<template v-if="(query ?? '').trim()"> · учтён поиск «{{ (query ?? '').trim() }}»</template></span>
       </div>
       <q-table flat dense wrap-cells :rows="sourceRows" :columns="sourceColumns" row-key="source_id"
         :pagination="{ rowsPerPage: 10 }" :rows-per-page-options="[10, 25, 50, 100]"
@@ -206,6 +206,8 @@ const sourceColumns: QTableColumn[] = [
 .chips { gap: 4px; flex-wrap: wrap; }
 .chip--review { border-color: var(--sv-medium-border); }
 .registry-table { background: var(--sv-surface); color: var(--sv-text); }
+.registry-table :deep(.q-table__bottom) { flex-wrap: wrap; row-gap: 4px; }
+.registry-table :deep(.q-table__control) { flex-wrap: wrap; }
 .source { margin-top: 8px; font-size: 12px; overflow-wrap: anywhere; }
 summary { cursor: pointer; color: var(--sv-text-2); }
 blockquote { margin: 8px 0; padding-left: 12px; border-left: 2px solid var(--sv-border); }

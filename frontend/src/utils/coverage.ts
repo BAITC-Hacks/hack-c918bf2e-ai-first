@@ -33,7 +33,7 @@ export function coverageState(a: Pick<Analysis, 'function_registry'>): CoverageS
   const parts: string[] = []
   if (c.unresolved_fragments > 0) parts.push(`${c.unresolved_fragments} фрагм. без решения`)
   if (c.needs_review_mappings > 0) parts.push(`${c.needs_review_mappings} сопоставл. требуют проверки`)
-  if (c.reviewed_fragments < c.total_fragments) parts.push(`рассмотрено ${c.reviewed_fragments} из ${c.total_fragments} фрагм.`)
+  if (c.reviewed_fragments < c.total_fragments) parts.push(`рассмотрено фрагментов: ${c.reviewed_fragments} из ${c.total_fragments}`)
   return {
     kind: incomplete ? 'incomplete' : 'complete',
     totalFragments: c.total_fragments,

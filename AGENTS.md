@@ -1,56 +1,55 @@
-# AI First — shared development instructions
+# AI First — development instructions
 
-This file is the single source of truth for both Codex and Claude Code. `CLAUDE.md`
-must remain a symbolic link to this file so the instructions cannot drift.
+Shared instructions for contributors, Codex and Claude Code. `CLAUDE.md` must remain
+a symbolic link to this file. Product capabilities, setup and limitations belong
+in README.md; verification evidence belongs in docs/VALIDATION.md.
 
-## Goal and constraints
+## Project and current implementation
 
-- Build a judge-ready agentic AI prototype for hackalem.ai in a five-hour window.
-- Optimize for a reliable end-to-end demo and clear user value before extra features.
-- Track: Kazakhtelecom special track.
-- Case: compare organizational regulations and structures before/after a reorganization,
-  detect lost, duplicated, added, moved, or materially changed functions, and produce
-  an evidence-backed conclusion with references to document clauses.
-- Never claim a feature in README or the demo unless it works in the current branch.
-- Commit and push a working checkpoint every 30–40 minutes. Before each checkpoint,
-  run the fastest relevant verification and keep commits focused.
+- Hackalem.ai, Kazakhtelecom case: compare organizational regulations before/after
+  reorganization; expose changes, possible losses, duplication and conflicts of
+  interest with source references and a reviewable conclusion.
+- Backend: Python 3.12, FastAPI, Pydantic. Frontend: Vue 3, Quasar, TypeScript.
+- Delivery: Docker Compose; frontend builds with Node 22 and runs on nginx.
+- PostgreSQL stores analyses and checkpoints in JSONB. The image includes pgvector,
+  but retrieval, embeddings and RAG are not implemented.
+- OpenAI is the implemented provider. NVIDIA/provider switching is not implemented.
+- One explicit Python orchestrator coordinates extraction, matching, analysis,
+  evidence validation, model criticism and bounded revision/rollback.
 
-## Required stack
+## Correctness and scope
 
-- Backend: Python 3.12, FastAPI, Pydantic.
-- Frontend: Vue 3, Quasar, TypeScript.
-- Data: PostgreSQL with pgvector when semantic retrieval is required.
-- Delivery: Docker Compose; frontend uses a multi-stage Node build and nginx runtime.
-- Configuration: `.back_env`, `.front_env`, and `.env` are local-only. Commit matching
-  `.example` files with safe defaults and no secrets.
+- Prioritize the working end-to-end flow; avoid last-minute architectural expansion.
+- Never claim capabilities or successful checks that are absent from the current code.
+- Validate structured model output with Pydantic and verify evidence in code.
+- Preserve unresolved sources and mappings. Missing output is not proof of a lost
+  function; an exact quotation is not proof of correct semantic interpretation.
+- The critic must review published conclusions and guarded mapping statuses.
+- Do not hide warnings, replace real API failures with demo data, or describe coverage
+  and model scores as measured accuracy. Mock mode must remain explicitly marked.
+- Keep timeouts, bounded retries and recoverable errors for external calls.
+- Live model tests cost money: run only within the user's approved scope.
 
-## Architecture principles
+## Collaboration and repository hygiene
 
-- Keep one explicit orchestrator and a small number of tools; introduce multiple agents
-  only where independent roles produce observable value.
-- Store run state and important decisions so a run can be inspected and reproduced.
-- Make LLM outputs structured and validate them with Pydantic before business logic.
-- Ground factual answers in retrieved context and return source references.
-- Put deterministic checks before an LLM evaluator; use model-based evaluation only
-  for criteria that cannot be checked reliably in code.
-- Add timeouts, bounded retries, and a useful error state for every external API.
-- Keep provider access behind a small adapter so OpenAI and NVIDIA models can be
-  switched by configuration.
+- Inspect git status before editing; preserve other contributors' changes.
+- Keep commits focused; stage explicit files rather than unrelated ongoing work.
+- During active hackathon work, commit and push verified checkpoints every 30–40 minutes.
+- Keep `.back_env`, `.front_env`, `.env`, uploaded documents and customer results out
+  of Git. Maintain safe `.example` files; do not print secrets in logs or tool output.
+- Do not track caches, node_modules, builds or local design exports.
+- Do not remove Docker data volumes or rewrite saved results to improve a demo.
+- Keep backend schema, frontend types, contract examples and tests aligned when
+  changing an API. Record meaningful architecture decisions in docs/decisions/.
 
-## Definition of done
+## Verification and handoff
 
-- `docker compose up --build` starts the complete project from a clean clone.
-- Health checks pass and the main user journey works without manual database changes.
-- The UI exposes progress, final output, sources, and recoverable errors.
-- At least one happy-path integration test covers the core scenario.
-- README describes the actual problem, implemented features, architecture, setup,
-  demo flow, limitations, and required environment variables.
-- No secrets, local env files, generated caches, or build artifacts are tracked.
-
-## Collaboration
-
-- Inspect existing changes before editing; do not overwrite another agent's work.
-- Prefer small modules with clear ownership boundaries to reduce merge conflicts.
-- When changing an API contract, update backend schema, frontend types, examples, and
-  tests in the same change.
-- Record meaningful architecture decisions briefly in README or `docs/decisions/`.
+- Backend, from backend/: install `.[dev]`, then `python -m pytest -q` and
+  `ruff check app tests`. `TEST_DATABASE_URL` enables isolated PostgreSQL tests.
+- Frontend, from frontend/: `npm ci`, `npm test`, `npm run build`.
+- `docker compose up --build -d --wait` must start frontend, backend and database.
+  Check health and the real API path through frontend nginx, not only mock data.
+- Preserve stored analyses across ordinary container recreation. Clearly distinguish
+  automated tests, saved-result UI checks and live model runs in the handoff.
+- README must describe the actual problem, implemented features, architecture,
+  environment setup, demo flow and material limitations, without unsupported claims.
