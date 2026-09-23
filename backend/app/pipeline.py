@@ -15,7 +15,7 @@ from app.analyzer import (
 )
 from app.config import Settings
 from app.documents import Clause, match_source_quote, parse_documents
-from app.registry import extract_registry, match_registry, reconcile_mappings
+from app.registry import FunctionLinkDraft, extract_registry, match_registry, reconcile_mappings
 from app.schemas import (
     AgentTraceEntry,
     AnalysisSummary,
@@ -332,7 +332,27 @@ def evaluate_comparison(
             verified_findings, verified_orgs, warnings + risk_warnings, verified_risks
         )
     })
-    assessment = assess_quality_with_openai(review_input, settings, before, after, issues, registry)
+    review_registry = registry
+    if registry is not None:
+        # The critic must see the same guarded statuses that the API will publish,
+        # not raw lost/added drafts already downgraded because extraction is incomplete.
+        review_registry = reconcile_mappings(
+            registry, comparison.function_links, comparison.added_after_ids
+        )
+        review_input.function_links = [
+            FunctionLinkDraft(
+                before_id=row.before_id, after_ids=row.after_ids,
+                status=row.status.value, explanation=row.explanation,
+            )
+            for row in review_registry.mappings if row.before_id is not None
+        ]
+        review_input.added_after_ids = [
+            item for row in review_registry.mappings
+            if row.status == MappingStatus.ADDED for item in row.after_ids
+        ]
+    assessment = assess_quality_with_openai(
+        review_input, settings, before, after, issues, review_registry
+    )
     if issues:
         assessment.passed = False
         assessment.score = min(assessment.score, 0.49)

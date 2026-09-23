@@ -7,7 +7,7 @@ from app import pipeline
 from app.analyzer import ComparisonDraft, EvidenceDraft, FindingDraft, QualityAssessment
 from app.config import Settings
 from app.documents import Clause
-from app.registry import FunctionLinkDraft
+from app.registry import FunctionLinkDraft, extract_registry, registry_context
 from app.schemas import FindingType, Severity
 
 
@@ -94,6 +94,65 @@ def test_critic_checks_actual_report_not_unused_generated_prose(monkeypatch):
     assert "НЕПРОВЕРЕННОЕ" not in calls[0]
     assert "before.docx, 1.1" in calls[0]
     assert original.conclusion == "НЕПРОВЕРЕННОЕ УТВЕРЖДЕНИЕ"
+
+
+@pytest.mark.parametrize("incomplete", [False, True])
+def test_critic_sees_published_mapping_statuses_without_mutating_drafts(
+    monkeypatch, stub_registry_model, incomplete
+):
+    before = [Clause("before.docx", "1.1", "Контролирует риски")]
+    after = [Clause("after.docx", "1.1", "Формирует отчётность")]
+    registry = extract_registry(before, after, Settings())
+    if incomplete:
+        for review in registry.source_reviews:
+            review.status = "needs_review"
+    original = draft()
+    calls = []
+
+    def critic(comparison, settings, before, after, issues, review_registry):
+        calls.append((comparison, issues, review_registry))
+        return assessment()
+
+    monkeypatch.setattr(pipeline, "assess_quality_with_openai", critic)
+    result = pipeline.evaluate_comparison(original, before, after, Settings(), registry)
+    projected, issues, reviewed = calls[0]
+    assert original.function_links[0].status == "lost"
+    assert original.added_after_ids == ["A0001-F01"]
+    assert not registry.mappings
+    if incomplete:
+        assert projected.function_links[0].status == "needs_review"
+        assert projected.added_after_ids == []
+        assert reviewed.coverage.needs_review_mappings == 2
+        assert '"unresolved_after_ids": ["A0001-F01"]' in registry_context(reviewed)
+        assert any(issue.category == "coverage" for issue in issues)
+        assert result.score <= 0.49
+    else:
+        assert projected.function_links[0].status == "lost"
+        assert projected.added_after_ids == ["A0001-F01"]
+        assert not issues
+        assert result.score == 0.95
+
+
+def test_invalid_mapping_remains_a_quality_issue_after_critic_projection(
+    monkeypatch, stub_registry_model
+):
+    before = [Clause("before.docx", "1.1", "Контролирует риски")]
+    after = [Clause("after.docx", "1.1", "Формирует отчётность")]
+    registry = extract_registry(before, after, Settings())
+    original = draft()
+    original.function_links[0].after_ids = ["nonexistent"]
+    original.function_links[0].status = "unchanged"
+
+    def critic(comparison, settings, before, after, issues, reviewed):
+        assert comparison.function_links[0].status == "needs_review"
+        assert comparison.function_links[0].after_ids == []
+        assert any("невалидные ID: да" in issue.message for issue in issues)
+        return assessment()
+
+    monkeypatch.setattr(pipeline, "assess_quality_with_openai", critic)
+    result = pipeline.evaluate_comparison(original, before, after, Settings(), registry)
+    assert result.passed is False
+    assert result.score <= 0.49
 
 
 def test_full_pipeline_repairs_invalid_quote_and_reports_only_accepted_claims(

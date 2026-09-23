@@ -499,6 +499,12 @@ def registry_context(registry: FunctionRegistry | None) -> str:
             {
                 "functions": [item.model_dump(mode="json") for item in registry.functions],
                 "unresolved_fragments": registry.coverage.unresolved_fragments,
+                "coverage": registry.coverage.model_dump(mode="json"),
+                "unresolved_after_ids": [
+                    item for row in registry.mappings
+                    if row.before_id is None and row.status == MappingStatus.NEEDS_REVIEW
+                    for item in row.after_ids
+                ],
             },
             ensure_ascii=False,
         )
