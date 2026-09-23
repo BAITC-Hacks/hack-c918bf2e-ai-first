@@ -1,0 +1,8 @@
+APP_ENV=development
+LOG_LEVEL=INFO
+DATABASE_URL=postgresql+asyncpg://ai_first:change-me@db:5432/ai_first
+LLM_PROVIDER=openai
+OPENAI_API_KEY=
+OPENAI_MODEL=
+NVIDIA_API_KEY=
+NVIDIA_MODEL=

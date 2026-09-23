@@ -1,0 +1,37 @@
+# Secrets and local configuration
+.env
+.back_env
+.front_env
+.env.*
+!.env.example
+!.back_env.example
+!.front_env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# JavaScript / Vue / Quasar
+node_modules/
+dist/
+.quasar/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# IDE, OS, runtime
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+data/
+uploads/
