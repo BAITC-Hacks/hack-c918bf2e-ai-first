@@ -6,6 +6,8 @@ from uuid import uuid4
 from app.analyzer import (
     ComparisonDraft,
     EvidenceDraft,
+    QualityAssessment,
+    QualityIssue,
     analyze_with_openai,
     assess_quality_with_openai,
     revise_with_openai,
@@ -13,6 +15,7 @@ from app.analyzer import (
 from app.config import Settings
 from app.documents import Clause, parse_documents
 from app.schemas import (
+    AgentTraceEntry,
     AnalysisSummary,
     Evidence,
     Finding,
@@ -20,7 +23,6 @@ from app.schemas import (
     OrganizationChange,
     OrganizationChangeStatus,
     Severity,
-    AgentTraceEntry,
 )
 
 
@@ -40,29 +42,33 @@ def normalize(value: str) -> str:
 
 
 def normalize_clause(value: str) -> str:
-    match = re.search(r"\d+(?:\.\d+)+", value)
-    return match.group(0) if match else value.strip().rstrip(".")
+    match = re.fullmatch(r"\s*(?:п(?:ункт)?\.?\s*)?(\d+(?:\.\d+)*)(?:[.)])?\s*", value)
+    return match.group(1) if match else normalize(value)
 
 
-def evidence_index(clauses: list[Clause]) -> dict[tuple[str, str], Clause]:
-    return {(normalize(item.document), normalize_clause(item.clause)): item for item in clauses}
+def evidence_index(clauses: list[Clause]) -> dict[tuple[str, str], list[Clause]]:
+    index: dict[tuple[str, str], list[Clause]] = {}
+    for item in clauses:
+        index.setdefault((normalize(item.document), normalize_clause(item.clause)), []).append(item)
+    return index
 
 
 def verify_evidence(
-    draft: EvidenceDraft | None, index: dict[tuple[str, str], Clause]
+    draft: EvidenceDraft | None, index: dict[tuple[str, str], list[Clause]]
 ) -> Evidence | None:
     if draft is None:
         return None
     clause_number = normalize_clause(draft.clause)
-    clause = index.get((normalize(draft.document), clause_number))
-    if clause is None:
-        same_number = [item for (_, number), item in index.items() if number == clause_number]
-        clause = same_number[0] if len(same_number) == 1 else None
-    if clause is None:
+    candidates = index.get((normalize(draft.document), clause_number), [])
+    # Never guess the document from a clause number. Ambiguous locators fail closed.
+    if len(candidates) != 1 or not draft.quote.strip():
         return None
-    # The model selects the source clause; the quote itself always comes from the
-    # parser. This prevents a paraphrased or hallucinated quote from reaching users.
-    exact_quote = clause.text[:1200]
+    clause = candidates[0]
+    pattern = r"\s+".join(re.escape(word) for word in draft.quote.split())
+    match = re.search(pattern, clause.text, re.IGNORECASE)
+    if match is None:
+        return None
+    exact_quote = clause.text[match.start() : match.end()]
     return Evidence(
         department=draft.department,
         clause=clause.clause,
@@ -72,7 +78,9 @@ def verify_evidence(
     )
 
 
-def required_evidence_present(kind: FindingType, before: Evidence | None, after: Evidence | None) -> bool:
+def required_evidence_present(
+    kind: FindingType, before: Evidence | None, after: Evidence | None
+) -> bool:
     if kind == FindingType.LOST:
         return before is not None
     if kind == FindingType.ADDED:
@@ -90,7 +98,11 @@ def build_findings(
     for draft in comparison.findings:
         before = verify_evidence(draft.before, before_index)
         after = verify_evidence(draft.after, after_index)
-        if not required_evidence_present(draft.type, before, after):
+        if (
+            (draft.before is not None and before is None)
+            or (draft.after is not None and after is None)
+            or not required_evidence_present(draft.type, before, after)
+        ):
             rejected += 1
             continue
         findings.append(
@@ -112,20 +124,25 @@ def build_findings(
     return findings, warnings
 
 
-def make_summary(before: list[Clause], after: list[Clause], findings: list[Finding]) -> AnalysisSummary:
+def make_summary(
+    before: list[Clause], after: list[Clause], findings: list[Finding]
+) -> AnalysisSummary:
     counts = {kind: 0 for kind in FindingType}
     for finding in findings:
         counts[finding.type] += 1
     return AnalysisSummary(
         before_functions=len(before),
         after_functions=len(after),
-        unchanged=max(0, min(len(before), len(after)) - sum(counts.values())),
+        unchanged=counts[FindingType.UNCHANGED],
         lost=counts[FindingType.LOST],
         added=counts[FindingType.ADDED],
         moved=counts[FindingType.MOVED],
         changed=counts[FindingType.CHANGED],
         duplicates=counts[FindingType.DUPLICATE],
-        high_risk=sum(item.severity == Severity.HIGH for item in findings),
+        high_risk=sum(
+            item.severity == Severity.HIGH and item.type != FindingType.UNCHANGED
+            for item in findings
+        ),
     )
 
 
@@ -139,6 +156,11 @@ def build_organization_changes(
     for draft in comparison.organization_changes:
         before = verify_evidence(draft.before, before_index)
         after = verify_evidence(draft.after, after_index)
+        if (draft.before is not None and before is None) or (
+            draft.after is not None and after is None
+        ):
+            rejected += 1
+            continue
         if draft.status == OrganizationChangeStatus.CREATED:
             before = None
         elif draft.status == OrganizationChangeStatus.REMOVED:
@@ -166,6 +188,93 @@ def build_organization_changes(
     return changes, rejected
 
 
+def source_issues(
+    comparison: ComparisonDraft, before: list[Clause], after: list[Clause]
+) -> list[QualityIssue]:
+    """Deterministic checks run before the LLM judge and cannot be overruled by it."""
+    indexes = {"before": evidence_index(before), "after": evidence_index(after)}
+    issues = []
+    for category, items in (
+        ("findings", comparison.findings),
+        ("organization_changes", comparison.organization_changes),
+    ):
+        for position, item in enumerate(items):
+            for side in ("before", "after"):
+                evidence = getattr(item, side)
+                if evidence is not None and verify_evidence(evidence, indexes[side]) is None:
+                    issues.append(
+                        QualityIssue(
+                            category="invalid_source",
+                            message=f"{category}[{position}].{side}: источник или цитата не подтверждены",
+                            revision_instruction=(
+                                f"Исправь {category}[{position}].{side}: скопируй точное имя документа, "
+                                "обозначение фрагмента и непрерывную дословную цитату из источника. "
+                                "Если подтверждения нет, удали вывод, не подбирай формальную ссылку."
+                            ),
+                        )
+                    )
+    findings, _ = build_findings(comparison, before, after)
+    _, rejected_orgs = build_organization_changes(comparison, before, after)
+    if len(findings) < len(comparison.findings) or rejected_orgs:
+        issues.append(
+            QualityIssue(
+                category="missing_evidence",
+                message="Часть выводов не проходит обязательную проверку доказательств",
+                revision_instruction="Проверь наличие обязательных источников для каждого типа вывода.",
+            )
+        )
+    return issues
+
+
+def evaluate_comparison(
+    comparison: ComparisonDraft, before: list[Clause], after: list[Clause], settings: Settings
+) -> QualityAssessment:
+    issues = source_issues(comparison, before, after)
+    assessment = assess_quality_with_openai(comparison, settings, before, after, issues)
+    if issues:
+        assessment.passed = False
+        assessment.score = min(assessment.score, 0.49)
+        assessment.issues = issues + assessment.issues
+    return assessment
+
+
+def build_conclusion(
+    findings: list[Finding], organizations: list[OrganizationChange], warnings: list[str]
+) -> str:
+    """No new model claims after filtering: report only accepted, source-linked items."""
+    deviations = [item for item in findings if item.type != FindingType.UNCHANGED]
+    lines = [
+        "Предварительное заключение по представленным документам.",
+        (
+            f"Отклонений с проверяемыми цитатами: {len(deviations)}; "
+            f"записей об организационной структуре: {len(organizations)}."
+        ),
+    ]
+    for item in deviations:
+        sources = "; ".join(
+            f"{side}: {evidence.document}, {evidence.clause}"
+            for side, evidence in (("ДО", item.before), ("ПОСЛЕ", item.after))
+            if evidence is not None
+        )
+        lines.append(
+            f"- {item.title}: {item.explanation} [{sources}] Рекомендация: {item.recommendation}"
+        )
+    for item in organizations:
+        sources = "; ".join(
+            f"{evidence.document}, {evidence.clause}"
+            for evidence in (item.before, item.after)
+            if evidence is not None
+        )
+        lines.append(f"- Структура ({item.status.value}): {item.explanation} [{sources}]")
+    if not deviations:
+        lines.append(
+            "Отсутствие принятых отклонений не доказывает отсутствие рисков или потерь функций."
+        )
+    lines.append("Выводы и полноту сопоставления должен подтвердить ответственный специалист.")
+    lines.extend(f"Ограничение: {warning}" for warning in warnings)
+    return "\n\n".join(lines)
+
+
 def analyze_documents(before: list[Path], after: list[Path], settings: Settings) -> PipelineResult:
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY не настроен")
@@ -183,13 +292,13 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
     before_clauses = parse_documents(before)
     after_clauses = parse_documents(after)
     if not before_clauses or not after_clauses:
-        raise RuntimeError("Не удалось выделить нумерованные пункты в одном из комплектов")
+        raise RuntimeError("Не удалось извлечь текстовые фрагменты в одном из комплектов")
     trace.append(
         AgentTraceEntry(
             agent="document_tools",
             action="extract",
             status="completed",
-            summary=f"Извлечено пунктов: до — {len(before_clauses)}, после — {len(after_clauses)}.",
+            summary=f"Извлечено фрагментов: до — {len(before_clauses)}, после — {len(after_clauses)}.",
         )
     )
     comparison = analyze_with_openai(before_clauses, after_clauses, settings)
@@ -205,7 +314,19 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
         )
     )
 
-    assessment = assess_quality_with_openai(comparison, settings)
+    initial_source_issues = source_issues(comparison, before_clauses, after_clauses)
+    trace.append(
+        AgentTraceEntry(
+            agent="evidence_verifier",
+            action="precheck",
+            status="completed",
+            summary=(
+                "До модельной оценки проверены документы, локаторы и дословные цитаты; "
+                f"замечаний: {len(initial_source_issues)}."
+            ),
+        )
+    )
+    assessment = evaluate_comparison(comparison, before_clauses, after_clauses, settings)
     trace.append(
         AgentTraceEntry(
             agent="critic_agent",
@@ -232,7 +353,9 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
                 summary=f"Выполнено целевое исправление по замечаниям контролёра: {revisions}.",
             )
         )
-        candidate_assessment = assess_quality_with_openai(candidate, settings)
+        candidate_assessment = evaluate_comparison(
+            candidate, before_clauses, after_clauses, settings
+        )
         trace.append(
             AgentTraceEntry(
                 agent="critic_agent",
@@ -244,7 +367,11 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
                 ),
             )
         )
-        if candidate_assessment.score >= assessment.score:
+        source_errors = len(source_issues(comparison, before_clauses, after_clauses))
+        candidate_errors = len(source_issues(candidate, before_clauses, after_clauses))
+        if candidate_errors < source_errors or (
+            candidate_errors == source_errors and candidate_assessment.score >= assessment.score
+        ):
             comparison = candidate
             assessment = candidate_assessment
             trace.append(
@@ -252,7 +379,7 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
                     agent="orchestrator",
                     action="accept_revision",
                     status="completed",
-                    summary="Исправленная версия принята: оценка качества не снизилась.",
+                    summary="Исправленная версия принята с приоритетом проверяемости источников.",
                 )
             )
         else:
@@ -262,17 +389,18 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
                     action="rollback",
                     status="completed",
                     summary=(
-                        "Исправленная версия отклонена: orchestrator сохранил вариант "
-                        f"с более высокой оценкой {assessment.score:.0%}."
+                        "Исправленная версия отклонена: ухудшилась проверяемость источников "
+                        "или, при равном числе ошибок, модельная оценка."
                     ),
                 )
             )
             break
     findings, warnings = build_findings(comparison, before_clauses, after_clauses)
-    if assessment.score < settings.agent_quality_threshold:
+    if not assessment.passed or assessment.score < settings.agent_quality_threshold:
         warnings.append(
             f"Оценка контролёра {assessment.score:.0%}: результат требует проверки специалистом."
         )
+        warnings.extend(issue.message for issue in assessment.issues)
     organization_changes, rejected_organizations = build_organization_changes(
         comparison, before_clauses, after_clauses
     )
@@ -295,16 +423,16 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
     summary = make_summary(before_clauses, after_clauses, findings)
     summary.before_functions = comparison.before_function_count
     summary.after_functions = comparison.after_function_count
-    summary.unchanged = max(
-        0,
-        min(comparison.before_function_count, comparison.after_function_count)
-        - len(findings),
+    warnings.append(
+        "Количество функций ДО/ПОСЛЕ — оценка модели, а не полный реестр. "
+        "Без изменений — только явно сопоставленные пары; полнота покрытия не измерена. "
+        "Оценка контролёра не является измеренной точностью системы."
     )
     return PipelineResult(
         summary=summary,
         findings=findings,
         organization_changes=organization_changes,
-        conclusion=comparison.conclusion,
+        conclusion=build_conclusion(findings, organization_changes, warnings),
         warnings=warnings,
         agent_trace=trace,
         quality_score=assessment.score,
