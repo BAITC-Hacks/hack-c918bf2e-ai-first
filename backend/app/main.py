@@ -92,6 +92,8 @@ async def run_analysis(analysis_id: str, before: list[Path], after: list[Path]) 
         analysis.organization_changes = result.organization_changes
         analysis.summary = result.summary
         analysis.warnings = result.warnings
+        analysis.agent_trace = result.agent_trace
+        analysis.quality_score = result.quality_score
         analysis.steps[3].status = StepStatus.COMPLETED
         analysis.progress = 90
 

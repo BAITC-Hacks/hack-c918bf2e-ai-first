@@ -94,6 +94,13 @@ class AnalysisError(BaseModel):
     message: str
 
 
+class AgentTraceEntry(BaseModel):
+    agent: str
+    action: str
+    status: str
+    summary: str
+
+
 class Analysis(BaseModel):
     id: str
     title: str
@@ -107,6 +114,8 @@ class Analysis(BaseModel):
     organization_changes: list[OrganizationChange] = []
     conclusion: str | None = None
     warnings: list[str] = []
+    agent_trace: list[AgentTraceEntry] = []
+    quality_score: float | None = Field(default=None, ge=0, le=1)
     error: AnalysisError | None = None
 
 

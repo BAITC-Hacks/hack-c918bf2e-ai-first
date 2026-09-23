@@ -67,6 +67,21 @@ backend и frontend до реализации.
       }
     }
   ],
+  "quality_score": 0.91,
+  "agent_trace": [
+    {
+      "agent": "orchestrator",
+      "action": "plan",
+      "status": "completed",
+      "summary": "Выбрана стратегия полного сопоставления."
+    },
+    {
+      "agent": "critic_agent",
+      "action": "evaluate",
+      "status": "completed",
+      "summary": "Оценка качества: 91%."
+    }
+  ],
   "findings": [
     {
       "id": "finding-uuid",

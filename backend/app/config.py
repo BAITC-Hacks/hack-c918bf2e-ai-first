@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-6-sol"
     openai_reasoning_effort: str = "low"
+    agent_max_revisions: int = 1
+    agent_quality_threshold: float = 0.8
     cors_origins: str = "http://localhost:3001,http://localhost:9000"
     upload_dir: str = "/tmp/ai-first/uploads"
     max_file_size_mb: int = 20

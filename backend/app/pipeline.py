@@ -3,7 +3,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
-from app.analyzer import ComparisonDraft, EvidenceDraft, analyze_with_openai
+from app.analyzer import (
+    ComparisonDraft,
+    EvidenceDraft,
+    analyze_with_openai,
+    assess_quality_with_openai,
+    revise_with_openai,
+)
 from app.config import Settings
 from app.documents import Clause, parse_documents
 from app.schemas import (
@@ -14,6 +20,7 @@ from app.schemas import (
     OrganizationChange,
     OrganizationChangeStatus,
     Severity,
+    AgentTraceEntry,
 )
 
 
@@ -24,6 +31,8 @@ class PipelineResult:
     organization_changes: list[OrganizationChange]
     conclusion: str
     warnings: list[str]
+    agent_trace: list[AgentTraceEntry]
+    quality_score: float
 
 
 def normalize(value: str) -> str:
@@ -160,12 +169,110 @@ def build_organization_changes(
 def analyze_documents(before: list[Path], after: list[Path], settings: Settings) -> PipelineResult:
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY не настроен")
+    trace = [
+        AgentTraceEntry(
+            agent="orchestrator",
+            action="plan",
+            status="completed",
+            summary=(
+                f"Выбрана стратегия полного сопоставления: документов до — {len(before)}, "
+                f"после — {len(after)}."
+            ),
+        )
+    ]
     before_clauses = parse_documents(before)
     after_clauses = parse_documents(after)
     if not before_clauses or not after_clauses:
         raise RuntimeError("Не удалось выделить нумерованные пункты в одном из комплектов")
+    trace.append(
+        AgentTraceEntry(
+            agent="document_tools",
+            action="extract",
+            status="completed",
+            summary=f"Извлечено пунктов: до — {len(before_clauses)}, после — {len(after_clauses)}.",
+        )
+    )
     comparison = analyze_with_openai(before_clauses, after_clauses, settings)
+    trace.append(
+        AgentTraceEntry(
+            agent="comparison_agent",
+            action="compare",
+            status="completed",
+            summary=(
+                f"Первичный анализ: изменений структуры — {len(comparison.organization_changes)}, "
+                f"функциональных отклонений — {len(comparison.findings)}."
+            ),
+        )
+    )
+
+    assessment = assess_quality_with_openai(comparison, settings)
+    trace.append(
+        AgentTraceEntry(
+            agent="critic_agent",
+            action="evaluate",
+            status="completed",
+            summary=f"Оценка качества: {assessment.score:.0%}. {assessment.summary}",
+        )
+    )
+    revisions = 0
+    while (
+        revisions < settings.agent_max_revisions
+        and (not assessment.passed or assessment.score < settings.agent_quality_threshold)
+        and assessment.issues
+    ):
+        candidate = revise_with_openai(
+            before_clauses, after_clauses, comparison, assessment, settings
+        )
+        revisions += 1
+        trace.append(
+            AgentTraceEntry(
+                agent="comparison_agent",
+                action="revise",
+                status="completed",
+                summary=f"Выполнено целевое исправление по замечаниям контролёра: {revisions}.",
+            )
+        )
+        candidate_assessment = assess_quality_with_openai(candidate, settings)
+        trace.append(
+            AgentTraceEntry(
+                agent="critic_agent",
+                action="re-evaluate",
+                status="completed",
+                summary=(
+                    f"Повторная оценка качества: {candidate_assessment.score:.0%}. "
+                    f"{candidate_assessment.summary}"
+                ),
+            )
+        )
+        if candidate_assessment.score >= assessment.score:
+            comparison = candidate
+            assessment = candidate_assessment
+            trace.append(
+                AgentTraceEntry(
+                    agent="orchestrator",
+                    action="accept_revision",
+                    status="completed",
+                    summary="Исправленная версия принята: оценка качества не снизилась.",
+                )
+            )
+        else:
+            trace.append(
+                AgentTraceEntry(
+                    agent="orchestrator",
+                    action="rollback",
+                    status="completed",
+                    summary=(
+                        "Исправленная версия отклонена: orchestrator сохранил вариант "
+                        f"с более высокой оценкой {assessment.score:.0%}."
+                    ),
+                )
+            )
+            break
     findings, warnings = build_findings(comparison, before_clauses, after_clauses)
+    if assessment.score < settings.agent_quality_threshold:
+        warnings.append(
+            f"Оценка контролёра {assessment.score:.0%}: результат требует проверки специалистом."
+        )
     organization_changes, rejected_organizations = build_organization_changes(
         comparison, before_clauses, after_clauses
     )
@@ -174,6 +281,17 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
             "Контроль качества исключил изменения структуры без проверяемых цитат: "
             f"{rejected_organizations}."
         )
+    trace.append(
+        AgentTraceEntry(
+            agent="evidence_verifier",
+            action="verify",
+            status="completed",
+            summary=(
+                f"Проверены источники: принято {len(findings)} выводов и "
+                f"{len(organization_changes)} изменений структуры."
+            ),
+        )
+    )
     summary = make_summary(before_clauses, after_clauses, findings)
     summary.before_functions = comparison.before_function_count
     summary.after_functions = comparison.after_function_count
@@ -188,4 +306,6 @@ def analyze_documents(before: list[Path], after: list[Path], settings: Settings)
         organization_changes=organization_changes,
         conclusion=comparison.conclusion,
         warnings=warnings,
+        agent_trace=trace,
+        quality_score=assessment.score,
     )
