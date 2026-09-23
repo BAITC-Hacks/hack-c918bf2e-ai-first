@@ -22,4 +22,3 @@ def test_analysis_requires_supported_documents() -> None:
         ],
     )
     assert response.status_code == 415
-

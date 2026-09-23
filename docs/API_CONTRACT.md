@@ -50,6 +50,23 @@ backend и frontend до реализации.
     "duplicates": 2,
     "high_risk": 3
   },
+  "organization_changes": [
+    {
+      "id": "organization-change-uuid",
+      "status": "created",
+      "before_name": null,
+      "after_name": "Департамент ИТ-аудита и анализа данных",
+      "explanation": "В новой редакции создано специализированное подразделение.",
+      "before": null,
+      "after": {
+        "department": "Блок внутреннего аудита",
+        "clause": "3.4",
+        "quote": "Департамент ИТ-аудита и анализа данных",
+        "document": "Положение_редакция_9.docx",
+        "page": null
+      }
+    }
+  ],
   "findings": [
     {
       "id": "finding-uuid",
@@ -77,6 +94,8 @@ backend и frontend до реализации.
 `status`: `queued | processing | completed | failed`.
 
 `finding.type`: `lost | added | moved | changed | duplicate | unchanged`.
+
+`organization_changes.status`: `created | preserved | transformed | removed`.
 
 `severity`: `high | medium | low | info`.
 

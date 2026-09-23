@@ -7,6 +7,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.pipeline import analyze_documents
 from app.schemas import Analysis, AnalysisCreated, AnalysisStatus, AnalysisStep
 from app.store import store
 
@@ -27,7 +28,7 @@ STEP_DEFINITIONS = [
     ("verify", "Проверка доказательств"),
     ("report", "Формирование заключения"),
 ]
-ALLOWED_EXTENSIONS = {".pdf", ".docx"}
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".xlsx"}
 
 
 @app.get("/health")
@@ -56,27 +57,44 @@ async def save_uploads(analysis_id: str, group: str, files: list[UploadFile]) ->
 
 
 async def run_analysis(analysis_id: str, before: list[Path], after: list[Path]) -> None:
-    # The real document/LLM pipeline is plugged into this stable lifecycle.
     analysis = await store.get(analysis_id)
     if analysis is None:
         return
     analysis.status = AnalysisStatus.PROCESSING
     await store.put(analysis)
     try:
-        for index, step in enumerate(analysis.steps):
+        for index, step in enumerate(analysis.steps[:2]):
             step.status = "processing"
             analysis.current_step = step.title
             analysis.progress = index * 20 + 5
             await store.put(analysis)
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0)
             step.status = "completed"
             analysis.progress = (index + 1) * 20
+
+        analysis.steps[2].status = "processing"
+        analysis.current_step = analysis.steps[2].title
+        analysis.progress = 45
+        result = await asyncio.to_thread(analyze_documents, before, after, settings)
+        analysis.steps[2].status = "completed"
+        analysis.progress = 70
+
+        analysis.steps[3].status = "processing"
+        analysis.current_step = analysis.steps[3].title
+        analysis.findings = result.findings
+        analysis.organization_changes = result.organization_changes
+        analysis.summary = result.summary
+        analysis.warnings = result.warnings
+        analysis.steps[3].status = "completed"
+        analysis.progress = 90
+
+        analysis.steps[4].status = "processing"
+        analysis.current_step = analysis.steps[4].title
+        analysis.conclusion = result.conclusion
+        analysis.steps[4].status = "completed"
+        analysis.progress = 100
         analysis.status = AnalysisStatus.COMPLETED
         analysis.current_step = "Готово"
-        analysis.conclusion = (
-            f"Документы приняты: до — {len(before)}, после — {len(after)}. "
-            "Модуль смыслового анализа подключается следующим этапом."
-        )
         await store.put(analysis)
     except Exception as exc:  # pragma: no cover - defensive job boundary
         analysis.status = AnalysisStatus.FAILED
@@ -117,4 +135,3 @@ async def get_analysis(analysis_id: str) -> Analysis:
     if analysis is None:
         raise HTTPException(404, "Анализ не найден")
     return analysis
-

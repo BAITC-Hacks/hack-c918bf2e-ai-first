@@ -34,6 +34,13 @@ class Severity(StrEnum):
     INFO = "info"
 
 
+class OrganizationChangeStatus(StrEnum):
+    CREATED = "created"
+    PRESERVED = "preserved"
+    TRANSFORMED = "transformed"
+    REMOVED = "removed"
+
+
 class AnalysisStep(BaseModel):
     code: str
     title: str
@@ -58,6 +65,16 @@ class Finding(BaseModel):
     before: Evidence | None = None
     after: Evidence | None = None
     recommendation: str
+
+
+class OrganizationChange(BaseModel):
+    id: str
+    status: OrganizationChangeStatus
+    before_name: str | None = None
+    after_name: str | None = None
+    explanation: str
+    before: Evidence | None = None
+    after: Evidence | None = None
 
 
 class AnalysisSummary(BaseModel):
@@ -87,6 +104,7 @@ class Analysis(BaseModel):
     steps: list[AnalysisStep]
     summary: AnalysisSummary | None = None
     findings: list[Finding] = []
+    organization_changes: list[OrganizationChange] = []
     conclusion: str | None = None
     warnings: list[str] = []
     error: AnalysisError | None = None
@@ -96,4 +114,3 @@ class AnalysisCreated(BaseModel):
     id: str
     status: AnalysisStatus
     created_at: datetime
-
