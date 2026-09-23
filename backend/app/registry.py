@@ -160,14 +160,69 @@ def match_registry(
         (unassigned[index : index + size], before) for index in range(0, len(unassigned), size)
     ]
     added = []
+    reverse_matches = []
     with ThreadPoolExecutor(max_workers=settings.registry_workers) as pool:
         for matches in pool.map(run_batch, reverse_jobs[:remaining]):
+            reverse_matches.extend(matches)
             added.extend(
                 item.source_id
                 for item in matches
                 if item.relation == "absent" and not item.target_ids
             )
-    return links, added
+    return merge_reverse_candidates(registry, links, reverse_matches), added
+
+
+def merge_reverse_candidates(
+    registry: FunctionRegistry,
+    links: list[FunctionLinkDraft],
+    reverse_matches: list[FunctionMatch],
+) -> list[FunctionLinkDraft]:
+    """Retain reverse evidence without treating one-sided agreement as a verified match.
+
+    New reverse edges can indicate splits/merges or contradict a forward loss.
+    Preserve existing edges and require review of the entire affected before row.
+    Final reconciliation still enforces source completeness and ID validity.
+    """
+    result = [item.model_copy(deep=True) for item in links]
+    before_ids = {item.id for item in registry.functions if item.side == DocumentSide.BEFORE}
+    after_ids = {item.id for item in registry.functions if item.side == DocumentSide.AFTER}
+    counts = Counter(item.before_id for item in result)
+    reverse_counts = Counter(item.source_id for item in reverse_matches)
+    by_id = {item.before_id: item for item in result if counts[item.before_id] == 1}
+    for match in reverse_matches:
+        if (
+            match.source_id not in after_ids
+            or reverse_counts[match.source_id] != 1
+            or not match.target_ids
+            or not all(item in before_ids for item in match.target_ids)
+            or match.relation not in ("unchanged", "moved", "changed", "needs_review")
+        ):
+            continue
+        for before_id in dict.fromkeys(match.target_ids):
+            if counts[before_id] > 1:
+                continue  # Do not hide ambiguous forward decisions.
+            row = by_id.get(before_id)
+            if row is not None and match.source_id in row.after_ids:
+                continue
+            reason = (
+                "Обратная сверка предложила соответствие; требуется проверка. " + match.reason
+            )
+            if row is None:
+                row = FunctionLinkDraft(
+                    before_id=before_id, after_ids=[], status="needs_review", explanation=reason
+                )
+                result.append(row)
+                by_id[before_id] = row
+            elif row.status == "lost":
+                row.explanation = (
+                    "Противоречие: прямая сверка указала потерю, обратная нашла кандидата. "
+                    + row.explanation + " " + reason
+                )
+            else:
+                row.explanation = row.explanation + " " + reason
+            row.after_ids.append(match.source_id)
+            row.status = "needs_review"
+    return result
 
 
 EXTRACTION_PROMPT = """Извлеки реестр функций, обязанностей и полномочий из ВСЕХ

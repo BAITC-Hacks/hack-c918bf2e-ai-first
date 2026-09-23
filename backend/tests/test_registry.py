@@ -212,3 +212,113 @@ def test_matcher_failure_does_not_manufacture_loss(monkeypatch):
     links, added = module.match_registry(data, Settings())
     result = reconcile_mappings(data, links, added)
     assert all(item.status == MappingStatus.NEEDS_REVIEW for item in result.mappings)
+
+
+def reverse_match(source_id="A0001-F01", targets=None, relation="unchanged"):
+    return module.FunctionMatch(
+        source_id=source_id,
+        target_ids=["B0001-F01"] if targets is None else targets,
+        relation=relation,
+        reason="Найден кандидат в старой редакции",
+    )
+
+
+def test_reverse_candidate_recovers_omission_but_does_not_certify_it(monkeypatch):
+    def match(sources, targets, settings):
+        return module.MatchBatch(
+            matches=[] if sources[0].side == DocumentSide.BEFORE else [reverse_match()]
+        )
+
+    monkeypatch.setattr(module, "match_batch_with_openai", match)
+    data = inventory()
+    links, added = module.match_registry(data, Settings())
+    result = reconcile_mappings(data, links, added)
+    assert added == []
+    assert len(result.mappings) == 1
+    assert result.mappings[0].after_ids == ["A0001-F01"]
+    assert result.mappings[0].status == MappingStatus.NEEDS_REVIEW
+    assert result.coverage.matched_before_functions == 0
+    assert "Обратная сверка" in result.mappings[0].explanation
+
+
+def test_reverse_candidate_contradicts_forward_loss():
+    data = inventory()
+    forward = [link(status="lost", after_ids=[])]
+    merged = module.merge_reverse_candidates(data, forward, [reverse_match()])
+    assert forward[0].status == "lost"  # Do not mutate prior stage's snapshot.
+    assert merged[0].status == "needs_review"
+    assert merged[0].after_ids == ["A0001-F01"]
+    assert "Противоречие" in merged[0].explanation
+
+
+@pytest.mark.parametrize("relation", ["unchanged", "changed", "moved", "needs_review"])
+def test_reverse_split_keeps_original_link_and_requires_review(relation):
+    data = inventory()
+    data.functions.append(data.functions[1].model_copy(update={"id": "A0002-F01"}))
+    merged = module.merge_reverse_candidates(
+        data, [link()], [reverse_match("A0002-F01", relation=relation)]
+    )
+    assert len(merged) == 1
+    assert merged[0].after_ids == ["A0001-F01", "A0002-F01"]
+    assert merged[0].status == "needs_review"
+
+
+def test_reverse_merge_keeps_both_before_functions_without_claiming_equivalence():
+    data = inventory()
+    data.functions.append(data.functions[0].model_copy(update={"id": "B0002-F01"}))
+    merged = module.merge_reverse_candidates(
+        data, [], [reverse_match(targets=["B0001-F01", "B0002-F01", "B0002-F01"])]
+    )
+    assert [row.before_id for row in merged] == ["B0001-F01", "B0002-F01"]
+    assert all(row.after_ids == ["A0001-F01"] for row in merged)
+    assert all(row.status == "needs_review" for row in merged)
+
+
+@pytest.mark.parametrize(
+    "reverse",
+    [
+        [reverse_match(source_id="unknown")],
+        [reverse_match(targets=["unknown"])],
+        [reverse_match(targets=["B0001-F01", "unknown"])],
+        [reverse_match(targets=[])],
+        [reverse_match(relation="absent")],
+        [reverse_match(), reverse_match()],
+    ],
+)
+def test_invalid_reverse_candidates_cannot_create_links(reverse):
+    assert module.merge_reverse_candidates(inventory(), [], reverse) == []
+
+
+def test_reverse_candidate_does_not_mask_duplicate_forward_decisions():
+    links = [link(status="lost", after_ids=[]), link(status="lost", after_ids=[])]
+    merged = module.merge_reverse_candidates(inventory(), links, [reverse_match()])
+    result = reconcile_mappings(inventory(), merged, [])
+    assert all(row.status == MappingStatus.NEEDS_REVIEW for row in result.mappings)
+    assert all(not row.after_ids for row in merged)
+
+
+def test_reverse_duplicate_edge_does_not_downgrade_valid_renumbering():
+    merged = module.merge_reverse_candidates(inventory(), [link()], [reverse_match()])
+    assert merged == [link()]
+
+
+def test_reverse_candidates_still_obey_incomplete_source_guards():
+    data = inventory()
+    data.source_reviews[1].status = "needs_review"
+    merged = module.merge_reverse_candidates(data, [], [reverse_match()])
+    result = reconcile_mappings(data, merged, [])
+    assert result.mappings[0].status == MappingStatus.NEEDS_REVIEW
+    assert "Извлечение неполно" in result.mappings[0].explanation
+
+
+def test_reverse_matching_respects_shared_batch_budget(monkeypatch):
+    calls = []
+
+    def match(sources, targets, settings):
+        calls.append(sources)
+        return module.MatchBatch(matches=[])
+
+    monkeypatch.setattr(module, "match_batch_with_openai", match)
+    links, added = module.match_registry(inventory(), Settings(registry_max_batches=1))
+    assert len(calls) == 1
+    assert links == added == []
